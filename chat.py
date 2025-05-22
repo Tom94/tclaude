@@ -10,8 +10,13 @@ import requests
 # Suppress the LibreSSL warning from urllib3
 warnings.filterwarnings("ignore", category=Warning, message=".*OpenSSL 1.1.1.*")
 
+# Web search tool configuration
+MAX_SEARCH_USES = 5
+ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
+BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
-def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=None, max_tokens=16384):
+
+def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=None, max_tokens=16384, enable_web_search=False):
     """
     Send user input to Anthropic API and get the response.
 
@@ -20,6 +25,7 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
         model (str): The Anthropic model to use
         session_file (str): Path to a session file for conversation history
         max_tokens (int): Maximum number of tokens in the response
+        enable_web_search (bool): Whether to enable the web search tool
 
     Returns:
         str: The response from Anthropic's API
@@ -43,7 +49,20 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
     # Add user message to history
     messages.append({"role": "user", "content": user_input})
 
+    # Prepare API request data
     data = {"model": model, "max_tokens": max_tokens, "messages": messages}
+
+    # Add web search tool if enabled
+    if enable_web_search:
+        web_search_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCH_USES}
+
+        # Add domain filters if specified
+        if ALLOWED_DOMAINS:
+            web_search_tool["allowed_domains"] = ALLOWED_DOMAINS
+        elif BLOCKED_DOMAINS:
+            web_search_tool["blocked_domains"] = BLOCKED_DOMAINS
+
+        data["tools"] = [web_search_tool]
 
     response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data)
 
@@ -52,10 +71,34 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
         return error_message, messages
 
     response_data = response.json()
-    assistant_message = response_data["content"][0]["text"]
 
-    # Add assistant response to history
-    messages.append({"role": "assistant", "content": assistant_message})
+    # Process the response content
+    if enable_web_search:
+        # For web search, we need to extract the text and handle citations
+        assistant_message = ""
+        citations = []
+
+        for content_block in response_data["content"]:
+            if content_block["type"] == "text":
+                assistant_message += content_block["text"]
+
+                # Handle citations if present
+                if "citations" in content_block:
+                    for citation in content_block["citations"]:
+                        if citation["type"] == "web_search_result_location":
+                            citations.append({"url": citation["url"], "title": citation["title"], "cited_text": citation["cited_text"]})
+
+        # Add citations to the end of the message if any exist
+        if citations:
+            assistant_message += "\n\nSources:\n"
+            for i, citation in enumerate(citations, 1):
+                assistant_message += f"{i}. {citation['title']} - {citation['url']}\n"
+    else:
+        # For regular responses without web search
+        assistant_message = response_data["content"][0]["text"]
+
+    # Add assistant response to history (store the original response for multi-turn conversations)
+    messages.append({"role": "assistant", "content": response_data["content"]})
 
     # Save updated history if session file is specified
     if session_file:
@@ -74,6 +117,7 @@ def main():
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     parser.add_argument("-m", "--model", default="claude-3-7-sonnet-20250219", help="Anthropic model to use (default: claude-3.7-sonnet)")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response (default: 16384)")
+    parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability (enabled by default)")
 
     args = parser.parse_args()
 
@@ -89,7 +133,13 @@ def main():
         return
 
     try:
-        response, _ = get_anthropic_response(user_input, model=args.model, session_file=args.session, max_tokens=args.max_tokens)
+        response, _ = get_anthropic_response(
+            user_input,
+            model=args.model,
+            session_file=args.session,
+            max_tokens=args.max_tokens,
+            enable_web_search=not args.no_web_search,  # Web search is enabled by default
+        )
         print("\nAnthropic's response:")
         print(response)
     except Exception as e:

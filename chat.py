@@ -5,16 +5,10 @@ import datetime
 import json
 import os
 import sys
-import warnings
 
 from anthropic import Anthropic
-from contextlib import nullcontext
-from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
 
-# Suppress the LibreSSL warning from urllib3
-warnings.filterwarnings("ignore", category=Warning, message=".*OpenSSL 1.1.1.*")
+from print import print_history
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -42,7 +36,6 @@ def get_anthropic_response(
     Send user input to Anthropic API and get the response using the Anthropic Python client.
     Uses streaming for incremental output.
     """
-    # Add user message to history
     history.append({"role": "user", "content": user_input})
 
     # Prepare request parameters
@@ -74,42 +67,31 @@ def get_anthropic_response(
         # Track if we're currently in a thinking block
         in_thinking_section = False
 
-        need_live_context = IS_ATTY and enable_printing
-        ctx = Live(auto_refresh=False, vertical_overflow="visible", transient=True) if need_live_context else nullcontext()
-
         def print_stream(text):
             nonlocal text_response
             text_response += text
-            if isinstance(ctx, Live):
-                md = Markdown(text_response, code_theme="native", inline_code_lexer="python")
-                ctx.update(md, refresh=True)
-            elif enable_printing:
+            if enable_printing:
                 print(text, end="", flush=True)
 
-        with ctx:
-            # Process each event in the stream
-            for event in stream:
-                # Handle different event types
-                if event.type == "content_block_delta":
-                    if event.delta.type == "thinking_delta":
-                        if not in_thinking_section:
-                            print_stream("\n# Thought process\n")
-                            in_thinking_section = True
+        # Process each event in the stream
+        for event in stream:
+            # Handle different event types
+            if event.type == "content_block_delta":
+                if event.delta.type == "thinking_delta":
+                    if not in_thinking_section:
+                        print_stream("\n# Thought process\n")
+                        in_thinking_section = True
 
-                        # Print the thinking text
-                        print_stream(event.delta.thinking)
+                    # Print the thinking text
+                    print_stream(event.delta.thinking)
 
-                    elif event.delta.type == "text_delta":
-                        if in_thinking_section:
-                            print_stream("\n\n# Thoughtful response\n")
-                            in_thinking_section = False
+                elif event.delta.type == "text_delta":
+                    if in_thinking_section:
+                        print_stream("\n\n# Thoughtful response\n")
+                        in_thinking_section = False
 
-                        # Print the text and add it to our response
-                        print_stream(event.delta.text)
-
-        if need_live_context:
-            console = Console()
-            console.print(Markdown(text_response, code_theme="native", inline_code_lexer="python"))
+                    # Print the text and add it to our response
+                    print_stream(event.delta.text)
 
         # Get the final message with all content
         final_message = stream.get_final_message()
@@ -124,13 +106,13 @@ def get_anthropic_response(
                             citations.append({"url": citation.url, "title": citation.title, "cited_text": citation.cited_text})
 
         if citations:
-            print_stream("\nSources:\n")
+            print_stream("\n\nSources:")
             for i, citation in enumerate(citations, 1):
-                print_stream(f"{i}. {citation['title']} - {citation['url']}\n")
+                print_stream(f"\n{i}. {citation['title']} - {citation['url']}")
 
-        # Convert the Pydantic model to a dictionary for JSON serialization
-        content_response = {"role": "assistant", "content": [block.model_dump() for block in final_message.content]}
-        return text_response, content_response, final_message.usage.input_tokens, final_message.usage.output_tokens
+        history.append({"role": "assistant", "content": [block.model_dump() for block in final_message.content]})
+
+        return text_response, final_message.usage.input_tokens, final_message.usage.output_tokens
 
 
 def main():
@@ -180,6 +162,7 @@ def main():
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
+                print_history("> ", history)
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
@@ -187,18 +170,17 @@ def main():
     total_input_tokens = 0
     total_output_tokens = 0
 
+    received_response = False
+
     try:
         while True:
             if is_repl:
-                console = Console()
-                username = os.getenv("USER") or os.getenv("USERNAME") or "User"
-                user_input = console.input(f"[bold #efb5f7]{username} [/]").strip()
-
+                user_input = input(f" ").strip()
                 if not user_input:
                     continue
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, content_response, input_tokens, output_tokens = get_anthropic_response(
+            _, input_tokens, output_tokens = get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -209,12 +191,15 @@ def main():
                 thinking_budget=args.thinking_budget,
             )
 
-            history.append(content_response)
+            if is_repl:
+                # An empty line between each prompt
+                print()
+                print()
+
+            received_response = True
 
             total_input_tokens += input_tokens
             total_output_tokens += output_tokens
-
-            print()
 
             if not is_repl:
                 break
@@ -224,7 +209,7 @@ def main():
         pass
 
     # Print stats and save session if in REPL mode
-    if is_repl and history:
+    if is_repl and received_response:
         # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
         price_per_minput = 3.0
         price_per_moutput = 15.0
@@ -242,10 +227,10 @@ def main():
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            session_name, _, input_tokens, output_tokens = get_anthropic_response(
+            session_name, input_tokens, output_tokens = get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
-                history=history,
+                history=history.copy(), # Using a copy ensures we don't modify the original history
                 max_tokens=30,
                 enable_web_search=False,
                 system_prompt=system_prompt,

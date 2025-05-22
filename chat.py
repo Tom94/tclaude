@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import datetime
+import json
 import os
 import sys
-import json
 import warnings
 
 from anthropic import Anthropic
@@ -35,6 +36,7 @@ def get_anthropic_response(
     system_prompt=None,
     enable_thinking=False,
     thinking_budget=None,
+    enable_printing=True,
 ):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
@@ -72,14 +74,16 @@ def get_anthropic_response(
         # Track if we're currently in a thinking block
         in_thinking_section = False
 
-        ctx = Live(auto_refresh=False, vertical_overflow="visible") if IS_ATTY else nullcontext()
+        need_live_context = IS_ATTY and enable_printing
+        ctx = Live(auto_refresh=False, vertical_overflow="visible", transient=True) if need_live_context else nullcontext()
+
         def print_stream(text):
             nonlocal text_response
             text_response += text
             if isinstance(ctx, Live):
                 md = Markdown(text_response, code_theme="native", inline_code_lexer="python")
                 ctx.update(md, refresh=True)
-            else:
+            elif enable_printing:
                 print(text, end="", flush=True)
 
         with ctx:
@@ -103,6 +107,10 @@ def get_anthropic_response(
                         # Print the text and add it to our response
                         print_stream(event.delta.text)
 
+        if need_live_context:
+            console = Console()
+            console.print(Markdown(text_response, code_theme="native", inline_code_lexer="python"))
+
         # Get the final message with all content
         final_message = stream.get_final_message()
 
@@ -120,12 +128,9 @@ def get_anthropic_response(
             for i, citation in enumerate(citations, 1):
                 print_stream(f"{i}. {citation['title']} - {citation['url']}\n")
 
-        # Add assistant response to history
         # Convert the Pydantic model to a dictionary for JSON serialization
-        serializable_content = [block.model_dump() for block in final_message.content]
-        history.append({"role": "assistant", "content": serializable_content})
-
-        return text_response, history, final_message.usage.input_tokens, final_message.usage.output_tokens
+        content_response = {"role": "assistant", "content": [block.model_dump() for block in final_message.content]}
+        return text_response, content_response, final_message.usage.input_tokens, final_message.usage.output_tokens
 
 
 def main():
@@ -185,15 +190,15 @@ def main():
     try:
         while True:
             if is_repl:
+                console = Console()
                 username = os.getenv("USER") or os.getenv("USERNAME") or "User"
-                user_input = input(f"{username} ").strip()
+                user_input = console.input(f"[bold #efb5f7]{username} [/]").strip()
 
                 if not user_input:
                     continue
 
             # The response is already printed during streaming, so we don't need to print it again
-            # We're ignoring the returned response since it's already been printed
-            _, _, input_tokens, output_tokens = get_anthropic_response(
+            _, content_response, input_tokens, output_tokens = get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -203,6 +208,9 @@ def main():
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
             )
+
+            history.append(content_response)
+
             total_input_tokens += input_tokens
             total_output_tokens += output_tokens
 
@@ -216,7 +224,7 @@ def main():
         pass
 
     # Print stats and save session if in REPL mode
-    if is_repl:
+    if is_repl and history:
         # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
         price_per_minput = 3.0
         price_per_moutput = 15.0
@@ -231,10 +239,29 @@ def main():
         print(f"\nTotal cost: ${total_cost:.2f}")
 
         # Save updated history if session file is specified
-        if args.session:
-            print(f"\nSaving session as {args.session}...")
-            with open(args.session, "w") as f:
-                json.dump(history, f, indent=2)
+        session_name = args.session
+        if session_name is None:
+            print("Auto-naming session file...")
+            session_name, _, input_tokens, output_tokens = get_anthropic_response(
+                "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
+                model=args.model,
+                history=history,
+                max_tokens=30,
+                enable_web_search=False,
+                system_prompt=system_prompt,
+                enable_thinking=False,
+                enable_printing=False,
+            )
+
+            session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
+            session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
+
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+            session_name = f"{date}-{session_name}.json"
+
+        print(f"\nSaving session as {session_name}...")
+        with open(session_name, "w") as f:
+            json.dump(history, f, indent=2)
 
 
 if __name__ == "__main__":

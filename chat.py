@@ -19,6 +19,7 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", session_file=None, max_tokens=16384, enable_web_search=False):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
+    Uses streaming for incremental output.
 
     Args:
         user_input (str): The user's input message
@@ -35,22 +36,22 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
     client = Anthropic()
 
     # Initialize or load messages history
-    messages = []
+    session = []
     if session_file and os.path.exists(session_file):
         try:
             with open(session_file, "r") as f:
-                messages = json.load(f)
+                session = json.load(f)
         except json.JSONDecodeError:
             print(f"Warning: Could not parse session file {session_file}. Starting new session.")
 
     # Add user message to history
-    messages.append({"role": "user", "content": user_input})
+    session.append({"role": "user", "content": user_input})
 
     # Prepare request parameters
     params = {
         "model": model,
         "max_tokens": max_tokens,
-        "messages": messages
+        "messages": session
     }
 
     # Add web search tool if enabled
@@ -70,21 +71,27 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
         params["tools"] = [web_search_tool]
 
     try:
-        # Make the API request using the Anthropic client
-        response = client.messages.create(**params)
+        text_response = ""
+        def print_stream(text):
+            print(text, end="", flush=True)
+            nonlocal text_response
+            text_response += text
 
-        # Process the response content
-        if enable_web_search:
-            # For web search, we need to extract the text and handle citations
-            assistant_message = ""
+        with client.messages.stream(**params) as stream:
+            # Print each text chunk as it arrives
+            for text in stream.text_stream:
+                print_stream(text)
+
+            print_stream("\n")
+
+            # Get the final message with all content
+            final_message = stream.get_final_message()
+
             citations = []
-
-            for content_block in response.content:
-                if content_block.type == "text":
-                    assistant_message += content_block.text
-
-                    # Handle citations if present
-                    if hasattr(content_block, "citations") and content_block.citations:
+            if enable_web_search:
+                # Extract citations from the response
+                for content_block in final_message.content:
+                    if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
                         for citation in content_block.citations:
                             if hasattr(citation, "type") and citation.type == "web_search_result_location":
                                 citations.append({
@@ -93,30 +100,26 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
                                     "cited_text": citation.cited_text
                                 })
 
-            # Add citations to the end of the message if any exist
             if citations:
-                assistant_message += "\n\nSources:\n"
+                print_stream("\nSources:\n")
                 for i, citation in enumerate(citations, 1):
-                    assistant_message += f"{i}. {citation['title']} - {citation['url']}\n"
-        else:
-            # For regular responses without web search
-            assistant_message = response.content[0].text
+                    print_stream(f"{i}. {citation['title']} - {citation['url']}\n")
 
-        # Add assistant response to history (store the original response for multi-turn conversations)
-        # Convert the Pydantic model to a dictionary using the built-in to_dict() method
-        serializable_content = [block.model_dump() for block in response.content]
-        messages.append({"role": "assistant", "content": serializable_content})
+            # Add assistant response to history
+            # Convert the Pydantic model to a dictionary for JSON serialization
+            serializable_content = [block.model_dump() for block in final_message.content]
+            session.append({"role": "assistant", "content": serializable_content})
 
-        # Save updated history if session file is specified
-        if session_file:
-            with open(session_file, "w") as f:
-                json.dump(messages, f, indent=2)
+            # Save updated history if session file is specified
+            if session_file:
+                with open(session_file, "w") as f:
+                    json.dump(session, f, indent=2)
 
-        return assistant_message, messages
+            return text_response, session
 
     except Exception as e:
         error_message = f"Error: {str(e)}"
-        return error_message, messages
+        return error_message, session
 
 
 def main():
@@ -144,15 +147,15 @@ def main():
         return
 
     try:
-        response, _ = get_anthropic_response(
+        # The response is already printed during streaming, so we don't need to print it again
+        # We're ignoring the returned response since it's already been printed
+        _, _ = get_anthropic_response(
             user_input,
             model=args.model,
             session_file=args.session,
             max_tokens=args.max_tokens,
             enable_web_search=not args.no_web_search,  # Web search is enabled by default
         )
-        print("\nAnthropic's response:")
-        print(response)
     except Exception as e:
         print(f"An error occurred: {e}")
 

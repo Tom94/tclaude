@@ -60,69 +60,64 @@ def get_anthropic_response(
 
         params["tools"] = [web_search_tool]
 
-    try:
-        text_response = ""
+    text_response = ""
 
-        def print_stream(text):
-            print(text, end="", flush=True)
-            nonlocal text_response
-            text_response += text
+    def print_stream(text):
+        print(text, end="", flush=True)
+        nonlocal text_response
+        text_response += text
 
-        with CLIENT.messages.stream(**params) as stream:
-            # Track if we're currently in a thinking block
-            in_thinking_section = False
+    with CLIENT.messages.stream(**params) as stream:
+        # Track if we're currently in a thinking block
+        in_thinking_section = False
 
-            # Process each event in the stream
-            for event in stream:
-                # Handle different event types
-                if event.type == "content_block_delta":
-                    if event.delta.type == "thinking_delta":
-                        if not in_thinking_section:
-                            print_stream("\n# Thought process\n")
-                            in_thinking_section = True
+        # Process each event in the stream
+        for event in stream:
+            # Handle different event types
+            if event.type == "content_block_delta":
+                if event.delta.type == "thinking_delta":
+                    if not in_thinking_section:
+                        print_stream("\n# Thought process\n")
+                        in_thinking_section = True
 
-                        # Print the thinking text
-                        print_stream(event.delta.thinking)
+                    # Print the thinking text
+                    print_stream(event.delta.thinking)
 
-                    elif event.delta.type == "text_delta":
-                        if in_thinking_section:
-                            print_stream("\n\n# Thoughtful response\n")
-                            in_thinking_section = False
+                elif event.delta.type == "text_delta":
+                    if in_thinking_section:
+                        print_stream("\n\n# Thoughtful response\n")
+                        in_thinking_section = False
 
-                        # Print the text and add it to our response
-                        print_stream(event.delta.text)
+                    # Print the text and add it to our response
+                    print_stream(event.delta.text)
 
-            # Print a newline after the streaming is complete
-            if not in_thinking_section:
-                print_stream("\n")
+        # Print a newline after the streaming is complete
+        if not in_thinking_section:
+            print_stream("\n")
 
-            # Get the final message with all content
-            final_message = stream.get_final_message()
+        # Get the final message with all content
+        final_message = stream.get_final_message()
 
-            citations = []
-            if enable_web_search:
-                # Extract citations from the response
-                for content_block in final_message.content:
-                    if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
-                        for citation in content_block.citations:
-                            if hasattr(citation, "type") and citation.type == "web_search_result_location":
-                                citations.append({"url": citation.url, "title": citation.title, "cited_text": citation.cited_text})
+        citations = []
+        if enable_web_search:
+            # Extract citations from the response
+            for content_block in final_message.content:
+                if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
+                    for citation in content_block.citations:
+                        if hasattr(citation, "type") and citation.type == "web_search_result_location":
+                            citations.append({"url": citation.url, "title": citation.title, "cited_text": citation.cited_text})
 
-            if citations:
-                print_stream("\nSources:\n")
-                for i, citation in enumerate(citations, 1):
-                    print_stream(f"{i}. {citation['title']} - {citation['url']}\n")
+        if citations:
+            print_stream("\nSources:\n")
+            for i, citation in enumerate(citations, 1):
+                print_stream(f"{i}. {citation['title']} - {citation['url']}\n")
 
-            # Add assistant response to history
-            # Convert the Pydantic model to a dictionary for JSON serialization
-            serializable_content = [block.model_dump() for block in final_message.content]
-            history.append({"role": "assistant", "content": serializable_content})
+        # Add assistant response to history
+        # Convert the Pydantic model to a dictionary for JSON serialization
+        serializable_content = [block.model_dump() for block in final_message.content]
+        history.append({"role": "assistant", "content": serializable_content})
 
-            return text_response, history
-
-    except Exception as e:
-        error_message = f"Error: {str(e)}"
-        return error_message, history
+        return text_response, history, final_message.usage.input_tokens, final_message.usage.output_tokens
 
 
 def main():
@@ -175,6 +170,9 @@ def main():
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
 
+    total_input_tokens = 0
+    total_output_tokens = 0
+
     try:
         while True:
             if is_repl:
@@ -187,7 +185,7 @@ def main():
 
             # The response is already printed during streaming, so we don't need to print it again
             # We're ignoring the returned response since it's already been printed
-            _, _ = get_anthropic_response(
+            _, _, input_tokens, output_tokens = get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -197,12 +195,28 @@ def main():
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
             )
+            total_input_tokens += input_tokens
+            total_output_tokens += output_tokens
+
             print()
 
             if not is_repl:
                 break
     except KeyboardInterrupt:
         pass
+    except EOFError:
+        pass
+
+    # Print token usage summary
+    print(f"\nTokens: input={total_input_tokens} output={total_output_tokens}")
+
+    # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
+    price_per_minput = 3.0
+    price_per_moutput = 15.0
+    input_tokens_cost = (total_input_tokens / 1000000) * price_per_minput
+    output_tokens_cost = (total_output_tokens / 1000000) * price_per_moutput
+    total_cost = input_tokens_cost + output_tokens_cost
+    print(f"Cost: input=${input_tokens_cost:.4f} output=${output_tokens_cost:.4f} total=${total_cost:.4f}")
 
     # Save updated history if session file is specified
     if args.session:

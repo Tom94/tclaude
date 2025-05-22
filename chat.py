@@ -8,7 +8,8 @@ import sys
 
 from anthropic import Anthropic
 
-from print import print_history
+from common import PROMPT
+from print import history_to_pretty_string
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -162,7 +163,7 @@ def main():
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
-                print_history(" ", history)
+                print(history_to_pretty_string(PROMPT, history), "\n")
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
@@ -175,7 +176,7 @@ def main():
     try:
         while True:
             if is_repl:
-                user_input = input(f" ").strip()
+                user_input = input(PROMPT).strip()
                 if not user_input:
                     continue
 

@@ -4,31 +4,42 @@ import argparse
 import json
 import os
 
+from io import StringIO
 
-def print_history(prompt, history):
+import common
+
+
+def history_to_string(prompt, history):
+    io = StringIO()
     for message in history:
         if message["role"] == "system":
-            print("\n# System prompt")
+            io.write("\n# System prompt\n")
             for content_block in message["content"]:
                 if content_block.type == "text":
-                    print(content_block.text)
+                    io.write(f"{content_block.text}\n")
         elif message["role"] == "user":
-            print(f"{prompt}{message['content']}")
+            io.write(f"{prompt}{message['content']}\n")
         elif message["role"] == "assistant":
             had_thinking = False
             for content_block in message["content"]:
                 if content_block["type"] == "thinking":
-                    print(f"\n# Thought process\n{content_block['thinking']}\n")
+                    io.write(f"\n# Thought process\n{content_block['thinking']}\n\n")
 
                     had_thinking = True
 
             for content_block in message["content"]:
                 if content_block["type"] == "text":
                     if had_thinking:
-                        print(f"\n# Thoughtful response\n{content_block['text']}\n")
+                        io.write(f"\n# Thoughtful response\n{content_block['text']}\n\n")
                     else:
-                        print(f"{content_block['text']}")
-                    print()
+                        io.write(f"{content_block['text']}\n")
+                    io.write("\n")
+
+    return io.getvalue().rstrip()
+
+
+def history_to_pretty_string(prompt, history):
+    return common.pretty_print_md(history_to_string(prompt, history))
 
 
 def main():
@@ -54,7 +65,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        print_history(" ", history)
+        print(history_to_pretty_string(common.PROMPT, history), end="", flush=True)
     except json.JSONDecodeError:
         print(f"Error: Could not parse JSON file '{args.path}'.")
     except Exception as e:

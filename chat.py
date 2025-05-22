@@ -17,45 +17,36 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
 
 def get_anthropic_response(
-    user_input, model="claude-3-7-sonnet-20250219", session_file=None, max_tokens=16384, enable_web_search=False, system_prompt=None
+    user_input,
+    model="claude-3-7-sonnet-20250219",
+    history=[],
+    max_tokens=16384,
+    enable_web_search=False,
+    system_prompt=None,
+    enable_thinking=False,
+    thinking_budget=None,
 ):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
     Uses streaming for incremental output.
-
-    Args:
-        user_input (str): The user's input message
-        model (str): The Anthropic model to use
-        session_file (str): Path to a session file for conversation history
-        max_tokens (int): Maximum number of tokens in the response
-        enable_web_search (bool): Whether to enable the web search tool
-        system_prompt (str): Optional system prompt to guide Claude's behavior
-
-    Returns:
-        str: The response from Anthropic's API
-        list: Updated messages history
     """
     # Initialize the Anthropic client
     client = Anthropic()
 
-    # Initialize or load messages history
-    session = []
-    if session_file and os.path.exists(session_file):
-        try:
-            with open(session_file, "r") as f:
-                session = json.load(f)
-        except json.JSONDecodeError:
-            print(f"Warning: Could not parse session file {session_file}. Starting new session.")
-
     # Add user message to history
-    session.append({"role": "user", "content": user_input})
+    history.append({"role": "user", "content": user_input})
 
     # Prepare request parameters
-    params = {"model": model, "max_tokens": max_tokens, "messages": session}
+    params = {"model": model, "max_tokens": max_tokens, "messages": history}
 
     # Add system prompt if provided
     if system_prompt:
         params["system"] = system_prompt
+
+    # Add extended thinking if enabled
+    if enable_thinking:
+        thinking_config = {"type": "enabled", "budget_tokens": thinking_budget if thinking_budget else max(1024, max_tokens // 2)}
+        params["thinking"] = thinking_config
 
     # Add web search tool if enabled
     if enable_web_search:
@@ -77,12 +68,35 @@ def get_anthropic_response(
             nonlocal text_response
             text_response += text
 
-        with client.messages.stream(**params) as stream:
-            # Print each text chunk as it arrives
-            for text in stream.text_stream:
-                print_stream(text)
+        print("claude> ", end="", flush=True)
 
-            print_stream("\n")
+        with client.messages.stream(**params) as stream:
+            # Track if we're currently in a thinking block
+            in_thinking_section = False
+
+            # Process each event in the stream
+            for event in stream:
+                # Handle different event types
+                if event.type == "content_block_delta":
+                    if event.delta.type == "thinking_delta":
+                        if not in_thinking_section:
+                            print_stream("\n# Thought process\n")
+                            in_thinking_section = True
+
+                        # Print the thinking text
+                        print_stream(event.delta.thinking)
+
+                    elif event.delta.type == "text_delta":
+                        if in_thinking_section:
+                            print_stream("\n\n# Thoughtful response\n")
+                            in_thinking_section = False
+
+                        # Print the text and add it to our response
+                        print_stream(event.delta.text)
+
+            # Print a newline after the streaming is complete
+            if not in_thinking_section:
+                print_stream("\n")
 
             # Get the final message with all content
             final_message = stream.get_final_message()
@@ -104,18 +118,13 @@ def get_anthropic_response(
             # Add assistant response to history
             # Convert the Pydantic model to a dictionary for JSON serialization
             serializable_content = [block.model_dump() for block in final_message.content]
-            session.append({"role": "assistant", "content": serializable_content})
+            history.append({"role": "assistant", "content": serializable_content})
 
-            # Save updated history if session file is specified
-            if session_file:
-                with open(session_file, "w") as f:
-                    json.dump(session, f, indent=2)
-
-            return text_response, session
+            return text_response, history
 
     except Exception as e:
         error_message = f"Error: {str(e)}"
-        return error_message, session
+        return error_message, history
 
 
 def main():
@@ -129,17 +138,22 @@ def main():
     parser.add_argument("-m", "--model", default="claude-3-7-sonnet-20250219", help="Anthropic model to use (default: claude-3.7-sonnet)")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response (default: 16384)")
     parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability (enabled by default)")
+    parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
+    parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
 
     args = parser.parse_args()
 
     # Get user input from arguments or stdin
+    user_input = ""
+    is_repl = False
     if args.input:
         user_input = " ".join(args.input)
-    else:
-        print("Enter your message (Ctrl+D to submit):")
+    elif not sys.stdin.isatty() and not sys.stdin.closed:
         user_input = sys.stdin.read().strip()
+    else:
+        is_repl = sys.stdin.isatty()
 
-    if not user_input:
+    if not user_input and not is_repl:
         print("No input provided.")
         return
 
@@ -153,19 +167,50 @@ def main():
             print(f"Error reading system prompt file: {e}")
             return
 
+    # Initialize or load messages history
+    history = []
+    if args.session and os.path.exists(args.session):
+        try:
+            with open(args.session, "r") as f:
+                history = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error: Could not parse session file {args.session}. Starting new session.")
+            return
+
     try:
-        # The response is already printed during streaming, so we don't need to print it again
-        # We're ignoring the returned response since it's already been printed
-        _, _ = get_anthropic_response(
-            user_input,
-            model=args.model,
-            session_file=args.session,
-            max_tokens=args.max_tokens,
-            enable_web_search=not args.no_web_search,  # Web search is enabled by default
-            system_prompt=system_prompt,
-        )
+        while True:
+            if is_repl:
+                # Get system username
+                username = os.getenv("USER") or os.getenv("USERNAME") or "User"
+                user_input = input(f"{username}> ").strip()
+                if not user_input:
+                    continue
+
+            # The response is already printed during streaming, so we don't need to print it again
+            # We're ignoring the returned response since it's already been printed
+            _, _ = get_anthropic_response(
+                user_input,
+                model=args.model,
+                history=history,
+                max_tokens=args.max_tokens,
+                enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                system_prompt=system_prompt,
+                enable_thinking=args.thinking,
+                thinking_budget=args.thinking_budget,
+            )
+
+            if not is_repl:
+                break
     except Exception as e:
         print(f"An error occurred: {e}")
+    except KeyboardInterrupt:
+        print("\nExiting...")
+
+    # Save updated history if session file is specified
+    if args.session:
+        print(f"\nSaving session as {args.session}...")
+        with open(args.session, "w") as f:
+            json.dump(history, f, indent=2)
 
 
 if __name__ == "__main__":

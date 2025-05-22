@@ -68,8 +68,6 @@ def get_anthropic_response(
             nonlocal text_response
             text_response += text
 
-        print("claude> ", end="", flush=True)
-
         with CLIENT.messages.stream(**params) as stream:
             # Track if we're currently in a thinking block
             in_thinking_section = False
@@ -183,6 +181,7 @@ def main():
                 # Get system username
                 username = os.getenv("USER") or os.getenv("USERNAME") or "User"
                 user_input = input(f"{username}> ").strip()
+
                 if not user_input:
                     continue
 
@@ -198,13 +197,12 @@ def main():
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
             )
+            print()
 
             if not is_repl:
                 break
-    except Exception as e:
-        print(f"An error occurred: {e}")
     except KeyboardInterrupt:
-        print("\nExiting...")
+        pass
 
     # Save updated history if session file is specified
     if args.session:

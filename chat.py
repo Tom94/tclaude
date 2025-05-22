@@ -11,7 +11,7 @@ import requests
 warnings.filterwarnings("ignore", category=Warning, message=".*OpenSSL 1.1.1.*")
 
 
-def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=None):
+def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=None, max_tokens=16384):
     """
     Send user input to Anthropic API and get the response.
 
@@ -19,6 +19,7 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
         user_input (str): The user's input message
         model (str): The Anthropic model to use
         session_file (str): Path to a session file for conversation history
+        max_tokens (int): Maximum number of tokens in the response
 
     Returns:
         str: The response from Anthropic's API
@@ -42,7 +43,7 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
     # Add user message to history
     messages.append({"role": "user", "content": user_input})
 
-    data = {"model": model, "max_tokens": 1000, "messages": messages}
+    data = {"model": model, "max_tokens": max_tokens, "messages": messages}
 
     response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data)
 
@@ -72,6 +73,7 @@ def main():
     parser.add_argument("input", nargs="*", help="Input text to send to Claude")
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     parser.add_argument("-m", "--model", default="claude-3-7-sonnet-20250219", help="Anthropic model to use (default: claude-3.7-sonnet)")
+    parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response (default: 16384)")
 
     args = parser.parse_args()
 
@@ -87,7 +89,7 @@ def main():
         return
 
     try:
-        response, _ = get_anthropic_response(user_input, model=args.model, session_file=args.session)
+        response, _ = get_anthropic_response(user_input, model=args.model, session_file=args.session, max_tokens=args.max_tokens)
         print("\nAnthropic's response:")
         print(response)
     except Exception as e:

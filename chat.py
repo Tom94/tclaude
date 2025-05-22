@@ -5,7 +5,7 @@ import os
 import sys
 import json
 import warnings
-import requests
+from anthropic import Anthropic
 
 # Suppress the LibreSSL warning from urllib3
 warnings.filterwarnings("ignore", category=Warning, message=".*OpenSSL 1.1.1.*")
@@ -16,9 +16,9 @@ ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
 BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
 
-def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=None, max_tokens=16384, enable_web_search=False):
+def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", session_file=None, max_tokens=16384, enable_web_search=False):
     """
-    Send user input to Anthropic API and get the response.
+    Send user input to Anthropic API and get the response using the Anthropic Python client.
 
     Args:
         user_input (str): The user's input message
@@ -31,11 +31,8 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
         str: The response from Anthropic's API
         list: Updated messages history
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
-
-    headers = {"x-api-key": api_key, "content-type": "application/json", "anthropic-version": "2023-06-01"}
+    # Initialize the Anthropic client
+    client = Anthropic()
 
     # Initialize or load messages history
     messages = []
@@ -49,12 +46,20 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
     # Add user message to history
     messages.append({"role": "user", "content": user_input})
 
-    # Prepare API request data
-    data = {"model": model, "max_tokens": max_tokens, "messages": messages}
+    # Prepare request parameters
+    params = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": messages
+    }
 
     # Add web search tool if enabled
     if enable_web_search:
-        web_search_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCH_USES}
+        web_search_tool = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": MAX_SEARCH_USES
+        }
 
         # Add domain filters if specified
         if ALLOWED_DOMAINS:
@@ -62,50 +67,56 @@ def get_anthropic_response(user_input, model="claude-3.7-sonnet", session_file=N
         elif BLOCKED_DOMAINS:
             web_search_tool["blocked_domains"] = BLOCKED_DOMAINS
 
-        data["tools"] = [web_search_tool]
+        params["tools"] = [web_search_tool]
 
-    response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=data)
+    try:
+        # Make the API request using the Anthropic client
+        response = client.messages.create(**params)
 
-    if response.status_code != 200:
-        error_message = f"Error: {response.status_code} - {response.text}"
+        # Process the response content
+        if enable_web_search:
+            # For web search, we need to extract the text and handle citations
+            assistant_message = ""
+            citations = []
+
+            for content_block in response.content:
+                if content_block.type == "text":
+                    assistant_message += content_block.text
+
+                    # Handle citations if present
+                    if hasattr(content_block, "citations") and content_block.citations:
+                        for citation in content_block.citations:
+                            if hasattr(citation, "type") and citation.type == "web_search_result_location":
+                                citations.append({
+                                    "url": citation.url,
+                                    "title": citation.title,
+                                    "cited_text": citation.cited_text
+                                })
+
+            # Add citations to the end of the message if any exist
+            if citations:
+                assistant_message += "\n\nSources:\n"
+                for i, citation in enumerate(citations, 1):
+                    assistant_message += f"{i}. {citation['title']} - {citation['url']}\n"
+        else:
+            # For regular responses without web search
+            assistant_message = response.content[0].text
+
+        # Add assistant response to history (store the original response for multi-turn conversations)
+        # Convert the Pydantic model to a dictionary using the built-in to_dict() method
+        serializable_content = [block.model_dump() for block in response.content]
+        messages.append({"role": "assistant", "content": serializable_content})
+
+        # Save updated history if session file is specified
+        if session_file:
+            with open(session_file, "w") as f:
+                json.dump(messages, f, indent=2)
+
+        return assistant_message, messages
+
+    except Exception as e:
+        error_message = f"Error: {str(e)}"
         return error_message, messages
-
-    response_data = response.json()
-
-    # Process the response content
-    if enable_web_search:
-        # For web search, we need to extract the text and handle citations
-        assistant_message = ""
-        citations = []
-
-        for content_block in response_data["content"]:
-            if content_block["type"] == "text":
-                assistant_message += content_block["text"]
-
-                # Handle citations if present
-                if "citations" in content_block:
-                    for citation in content_block["citations"]:
-                        if citation["type"] == "web_search_result_location":
-                            citations.append({"url": citation["url"], "title": citation["title"], "cited_text": citation["cited_text"]})
-
-        # Add citations to the end of the message if any exist
-        if citations:
-            assistant_message += "\n\nSources:\n"
-            for i, citation in enumerate(citations, 1):
-                assistant_message += f"{i}. {citation['title']} - {citation['url']}\n"
-    else:
-        # For regular responses without web search
-        assistant_message = response_data["content"][0]["text"]
-
-    # Add assistant response to history (store the original response for multi-turn conversations)
-    messages.append({"role": "assistant", "content": response_data["content"]})
-
-    # Save updated history if session file is specified
-    if session_file:
-        with open(session_file, "w") as f:
-            json.dump(messages, f, indent=2)
-
-    return assistant_message, messages
 
 
 def main():

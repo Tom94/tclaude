@@ -15,6 +15,9 @@ MAX_SEARCH_USES = 5
 ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
 BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
+# Initialize the Anthropic client
+CLIENT = Anthropic()
+
 
 def get_anthropic_response(
     user_input,
@@ -30,9 +33,6 @@ def get_anthropic_response(
     Send user input to Anthropic API and get the response using the Anthropic Python client.
     Uses streaming for incremental output.
     """
-    # Initialize the Anthropic client
-    client = Anthropic()
-
     # Add user message to history
     history.append({"role": "user", "content": user_input})
 
@@ -70,7 +70,7 @@ def get_anthropic_response(
 
         print("claude> ", end="", flush=True)
 
-        with client.messages.stream(**params) as stream:
+        with CLIENT.messages.stream(**params) as stream:
             # Track if we're currently in a thinking block
             in_thinking_section = False
 

@@ -7,12 +7,10 @@ import json
 import warnings
 
 from anthropic import Anthropic
-from rich.console import Console, ConsoleOptions, RenderResult
+from contextlib import nullcontext
+from rich.console import Console
 from rich.live import Live
-from rich.markdown import CodeBlock, Markdown
-from rich.syntax import Syntax, PygmentsSyntaxTheme
-
-from styles.dark_modern import DarkModern
+from rich.markdown import Markdown
 
 # Suppress the LibreSSL warning from urllib3
 warnings.filterwarnings("ignore", category=Warning, message=".*OpenSSL 1.1.1.*")
@@ -25,17 +23,7 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 # Initialize the Anthropic client
 CLIENT = Anthropic()
 
-
-class MyCodeBlock(CodeBlock):
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        print("test")
-        code = str(self.text).rstrip()
-        print("test")
-        syntax = Syntax(code, self.lexer_name, theme=PygmentsSyntaxTheme(DarkModern))
-        yield syntax
-
-
-Markdown.elements["code_block"] = MyCodeBlock
+IS_ATTY = sys.stdout.isatty()
 
 
 def get_anthropic_response(
@@ -84,14 +72,17 @@ def get_anthropic_response(
         # Track if we're currently in a thinking block
         in_thinking_section = False
 
-        with Live(auto_refresh=False, vertical_overflow="visible") as live:
-
-            def print_stream(text):
-                nonlocal text_response
-                text_response += text
+        ctx = Live(auto_refresh=False, vertical_overflow="visible") if IS_ATTY else nullcontext()
+        def print_stream(text):
+            nonlocal text_response
+            text_response += text
+            if isinstance(ctx, Live):
                 md = Markdown(text_response, code_theme="native", inline_code_lexer="python")
-                live.update(md, refresh=True)
+                ctx.update(md, refresh=True)
+            else:
+                print(text, end="", flush=True)
 
+        with ctx:
             # Process each event in the stream
             for event in stream:
                 # Handle different event types
@@ -194,9 +185,8 @@ def main():
     try:
         while True:
             if is_repl:
-                # Get system username
                 username = os.getenv("USER") or os.getenv("USERNAME") or "User"
-                user_input = input(f"{username}> ").strip()
+                user_input = input(f"{username} ").strip()
 
                 if not user_input:
                     continue
@@ -225,24 +215,26 @@ def main():
     except EOFError:
         pass
 
-    # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
-    price_per_minput = 3.0
-    price_per_moutput = 15.0
-    input_tokens_cost = (total_input_tokens / 1000000) * price_per_minput
-    output_tokens_cost = (total_output_tokens / 1000000) * price_per_moutput
-    total_cost = input_tokens_cost + output_tokens_cost
+    # Print stats and save session if in REPL mode
+    if is_repl:
+        # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
+        price_per_minput = 3.0
+        price_per_moutput = 15.0
+        input_tokens_cost = (total_input_tokens / 1000000) * price_per_minput
+        output_tokens_cost = (total_output_tokens / 1000000) * price_per_moutput
+        total_cost = input_tokens_cost + output_tokens_cost
 
-    if args.verbose:
-        print(f"\nTokens: input={total_input_tokens} output={total_output_tokens}")
-        print(f"\nCost: input=${input_tokens_cost:.2f} output=${output_tokens_cost:.2f} total=${total_cost:.2f}")
+        if args.verbose:
+            print(f"\nTokens: input={total_input_tokens} output={total_output_tokens}")
+            print(f"\nCost: input=${input_tokens_cost:.2f} output=${output_tokens_cost:.2f} total=${total_cost:.2f}")
 
-    print(f"\nTotal cost: ${total_cost:.2f}")
+        print(f"\nTotal cost: ${total_cost:.2f}")
 
-    # Save updated history if session file is specified
-    if args.session:
-        print(f"\nSaving session as {args.session}...")
-        with open(args.session, "w") as f:
-            json.dump(history, f, indent=2)
+        # Save updated history if session file is specified
+        if args.session:
+            print(f"\nSaving session as {args.session}...")
+            with open(args.session, "w") as f:
+                json.dump(history, f, indent=2)
 
 
 if __name__ == "__main__":

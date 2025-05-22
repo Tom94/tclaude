@@ -8,7 +8,7 @@ import sys
 
 from anthropic import Anthropic
 
-from common import PROMPT
+from common import prompt
 from print import history_to_pretty_string
 
 # Web search tool configuration
@@ -163,7 +163,7 @@ def main():
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
-                print(history_to_pretty_string(PROMPT, history), "\n")
+                print(history_to_pretty_string(prompt(True), history), "\n")
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
@@ -176,7 +176,7 @@ def main():
     try:
         while True:
             if is_repl:
-                user_input = input(PROMPT).strip()
+                user_input = input(prompt(True)).strip()
                 if not user_input:
                     continue
 

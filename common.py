@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 
 
-# PROMPT = "\033[1;35m \033[0m"
 PROMPT = " "
+
+
+def prompt(pretty: bool):
+    if pretty:
+        return f"\033[1;35m{PROMPT}\033[0m"
+    return PROMPT
 
 
 def pretty_print_md(string):

@@ -66,7 +66,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        result = history_to_string(common.PROMPT, history)
+        result = history_to_string(common.prompt(args.pretty), history)
         if args.pretty:
             result = common.pretty_print_md(result)
         print(result, end="", flush=True)

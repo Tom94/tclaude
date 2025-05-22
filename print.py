@@ -48,6 +48,7 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Print conversation history from a JSON file")
     parser.add_argument("path", help="Path to JSON file containing conversation history to print")
+    parser.add_argument("-p", "--pretty", action="store_true", help="Pretty print the conversation history using bat")
 
     args = parser.parse_args()
 
@@ -65,7 +66,10 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        print(history_to_pretty_string(common.PROMPT, history), end="", flush=True)
+        result = history_to_string(common.PROMPT, history)
+        if args.pretty:
+            result = common.pretty_print_md(result)
+        print(result, end="", flush=True)
     except json.JSONDecodeError:
         print(f"Error: Could not parse JSON file '{args.path}'.")
     except Exception as e:

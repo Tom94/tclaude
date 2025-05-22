@@ -230,7 +230,7 @@ def main():
             session_name, input_tokens, output_tokens = get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
-                history=history.copy(), # Using a copy ensures we don't modify the original history
+                history=history.copy(),  # Using a copy ensures we don't modify the original history
                 max_tokens=30,
                 enable_web_search=False,
                 system_prompt=system_prompt,

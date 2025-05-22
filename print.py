@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 
+
 def print_history(prompt, history):
     for message in history:
         if message["role"] == "system":
@@ -44,7 +45,7 @@ def main():
         print(f"Error: File '{args.path}' does not exist.")
         return
 
-    if not args.path.endswith('.json'):
+    if not args.path.endswith(".json"):
         print(f"Error: File '{args.path}' is not a JSON file.")
         return
 

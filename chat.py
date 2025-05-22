@@ -7,6 +7,7 @@ import os
 import sys
 
 from anthropic import Anthropic
+from io import StringIO
 
 from common import prompt
 from print import history_to_pretty_string
@@ -27,7 +28,8 @@ def get_anthropic_response(
     model,
     history=[],
     max_tokens=16384,
-    enable_web_search=False,
+    enable_web_search=True,
+    enable_code_exec=True,
     system_prompt=None,
     enable_thinking=False,
     thinking_budget=None,
@@ -53,6 +55,7 @@ def get_anthropic_response(
         params["thinking"] = thinking_config
 
     # Add web search tool if enabled
+    tools = []
     if enable_web_search:
         web_search_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCH_USES}
 
@@ -62,7 +65,14 @@ def get_anthropic_response(
         elif BLOCKED_DOMAINS:
             web_search_tool["blocked_domains"] = BLOCKED_DOMAINS
 
-        params["tools"] = [web_search_tool]
+        tools.append(web_search_tool)
+
+    if enable_code_exec:
+        code_exec_tool = {"type": "code_execution_20250522", "name": "code_execution"}
+        tools.append(code_exec_tool)
+
+    params["tools"] = tools
+    params["extra_headers"] = {"anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"}
 
     text_response = ""
     with CLIENT.messages.stream(**params) as stream:
@@ -77,6 +87,8 @@ def get_anthropic_response(
 
         # Process each event in the stream
         current_content_block = None
+        current_server_tool = None
+        tool_use_json = StringIO()
         for event in stream:
             # Handle different event types
             if event.type == "content_block_start":
@@ -94,11 +106,22 @@ def get_anthropic_response(
                         print_stream("# Thoughtful response\n\n")
                         in_thinking_section = True
                 elif event.content_block.type == "server_tool_use":
-                    print_stream(f"# Searching the web for: ")
+                    tool_use_json = StringIO()
+                    if event.content_block.name == "web_search":
+                        print_stream(f"# Searching the web for: ")
+                    elif event.content_block.name == "code_execution":
+                        print_stream(f"# Executing code...\n\n")
                 elif event.content_block.type == "web_search_tool_result":
                     print_stream(f"## Web search results\n\n")
                     for c in event.content_block.content:
                         print_stream(f"{c.title} - {c.url}\n")
+                elif event.content_block.type == "code_execution_tool_result":
+                    stdout = event.content_block.content.get("stdout", "")
+                    stderr = event.content_block.content.get("stderr", "")
+                    if stdout:
+                        print_stream(f"## stdout\n\n{event.content_block.content['stdout']}")
+                    if stderr:
+                        print_stream(f"## stderr\n\n{event.content_block.content['stderr']}")
 
             elif event.type == "content_block_delta":
                 if event.delta.type == "thinking_delta":
@@ -106,7 +129,19 @@ def get_anthropic_response(
                 elif event.delta.type == "text_delta":
                     print_stream(event.delta.text)
                 elif event.delta.type == "input_json_delta":
-                    print_stream(event.delta.partial_json)
+                    tool_use_json.write(event.delta.partial_json)
+
+            elif event.type == "content_block_stop":
+                if event.content_block.type == "thinking":
+                    pass
+                elif event.content_block.type == "text":
+                    pass
+                elif event.content_block.type == "server_tool_use":
+                    tool_use = json.loads(tool_use_json.getvalue())
+                    if event.content_block.name == "web_search":
+                        print_stream(tool_use.get("query", ""))
+                    elif event.content_block.name == "code_execution":
+                        print_stream(f"```python\n{tool_use.get('code', '')}\n```")
 
         # Get the final message with all content
         final_message = stream.get_final_message()

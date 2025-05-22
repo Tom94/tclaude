@@ -16,7 +16,9 @@ ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
 BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
 
-def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", session_file=None, max_tokens=16384, enable_web_search=False):
+def get_anthropic_response(
+    user_input, model="claude-3-7-sonnet-20250219", session_file=None, max_tokens=16384, enable_web_search=False, system_prompt=None
+):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
     Uses streaming for incremental output.
@@ -27,6 +29,7 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
         session_file (str): Path to a session file for conversation history
         max_tokens (int): Maximum number of tokens in the response
         enable_web_search (bool): Whether to enable the web search tool
+        system_prompt (str): Optional system prompt to guide Claude's behavior
 
     Returns:
         str: The response from Anthropic's API
@@ -48,19 +51,15 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
     session.append({"role": "user", "content": user_input})
 
     # Prepare request parameters
-    params = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": session
-    }
+    params = {"model": model, "max_tokens": max_tokens, "messages": session}
+
+    # Add system prompt if provided
+    if system_prompt:
+        params["system"] = system_prompt
 
     # Add web search tool if enabled
     if enable_web_search:
-        web_search_tool = {
-            "type": "web_search_20250305",
-            "name": "web_search",
-            "max_uses": MAX_SEARCH_USES
-        }
+        web_search_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCH_USES}
 
         # Add domain filters if specified
         if ALLOWED_DOMAINS:
@@ -72,6 +71,7 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
 
     try:
         text_response = ""
+
         def print_stream(text):
             print(text, end="", flush=True)
             nonlocal text_response
@@ -94,11 +94,7 @@ def get_anthropic_response(user_input, model="claude-3-7-sonnet-20250219", sessi
                     if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
                         for citation in content_block.citations:
                             if hasattr(citation, "type") and citation.type == "web_search_result_location":
-                                citations.append({
-                                    "url": citation.url,
-                                    "title": citation.title,
-                                    "cited_text": citation.cited_text
-                                })
+                                citations.append({"url": citation.url, "title": citation.title, "cited_text": citation.cited_text})
 
             if citations:
                 print_stream("\nSources:\n")
@@ -129,6 +125,7 @@ def main():
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     parser.add_argument("input", nargs="*", help="Input text to send to Claude")
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
+    parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
     parser.add_argument("-m", "--model", default="claude-3-7-sonnet-20250219", help="Anthropic model to use (default: claude-3.7-sonnet)")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response (default: 16384)")
     parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability (enabled by default)")
@@ -146,6 +143,16 @@ def main():
         print("No input provided.")
         return
 
+    # Read system prompt from file if provided
+    system_prompt = None
+    if args.role:
+        try:
+            with open(args.role, "r") as f:
+                system_prompt = f.read().strip()
+        except Exception as e:
+            print(f"Error reading system prompt file: {e}")
+            return
+
     try:
         # The response is already printed during streaming, so we don't need to print it again
         # We're ignoring the returned response since it's already been printed
@@ -155,6 +162,7 @@ def main():
             session_file=args.session,
             max_tokens=args.max_tokens,
             enable_web_search=not args.no_web_search,  # Web search is enabled by default
+            system_prompt=system_prompt,
         )
     except Exception as e:
         print(f"An error occurred: {e}")

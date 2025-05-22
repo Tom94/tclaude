@@ -24,7 +24,7 @@ IS_ATTY = sys.stdout.isatty()
 
 def get_anthropic_response(
     user_input,
-    model="claude-3-7-sonnet-20250219",
+    model,
     history=[],
     max_tokens=16384,
     enable_web_search=False,
@@ -32,6 +32,7 @@ def get_anthropic_response(
     enable_thinking=False,
     thinking_budget=None,
     enable_printing=True,
+    is_repl=False,
 ):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
@@ -75,24 +76,37 @@ def get_anthropic_response(
                 print(text, end="", flush=True)
 
         # Process each event in the stream
+        current_content_block = None
         for event in stream:
             # Handle different event types
-            if event.type == "content_block_delta":
-                if event.delta.type == "thinking_delta":
-                    if not in_thinking_section:
-                        print_stream("\n# Thought process\n")
-                        in_thinking_section = True
+            if event.type == "content_block_start":
+                if current_content_block is not None and current_content_block != event.content_block.type:
+                    print_stream("\n\n")
 
-                    # Print the thinking text
-                    print_stream(event.delta.thinking)
+                current_content_block = event.content_block.type
 
-                elif event.delta.type == "text_delta":
+                # Print the start of a new content block
+                if event.content_block.type == "thinking":
+                    print_stream("# Thought process\n\n")
+                    in_thinking_section = True
+                elif event.content_block.type == "text":
                     if in_thinking_section:
-                        print_stream("\n\n# Thoughtful response\n")
-                        in_thinking_section = False
+                        print_stream("# Thoughtful response\n\n")
+                        in_thinking_section = True
+                elif event.content_block.type == "server_tool_use":
+                    print_stream(f"# Searching the web for: ")
+                elif event.content_block.type == "web_search_tool_result":
+                    print_stream(f"## Web search results\n\n")
+                    for c in event.content_block.content:
+                        print_stream(f"{c.title} - {c.url}\n")
 
-                    # Print the text and add it to our response
+            elif event.type == "content_block_delta":
+                if event.delta.type == "thinking_delta":
+                    print_stream(event.delta.thinking)
+                elif event.delta.type == "text_delta":
                     print_stream(event.delta.text)
+                elif event.delta.type == "input_json_delta":
+                    print_stream(event.delta.partial_json)
 
         # Get the final message with all content
         final_message = stream.get_final_message()
@@ -124,7 +138,7 @@ def main():
     parser.add_argument("input", nargs="*", help="Input text to send to Claude")
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
-    parser.add_argument("-m", "--model", default="claude-3-7-sonnet-20250219", help="Anthropic model to use (default: claude-3.7-sonnet)")
+    parser.add_argument("-m", "--model", default="claude-sonnet-4-0", help="Anthropic model to use (default: claude-3.7-sonnet)")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response (default: 16384)")
     parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability (enabled by default)")
     parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
@@ -190,6 +204,7 @@ def main():
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
+                is_repl=is_repl,
             )
 
             if is_repl:
@@ -237,6 +252,7 @@ def main():
                 system_prompt=system_prompt,
                 enable_thinking=False,
                 enable_printing=False,
+                is_repl=False,
             )
 
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()

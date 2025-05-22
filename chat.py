@@ -162,7 +162,7 @@ def main():
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
-                print_history("> ", history)
+                print_history(" ", history)
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return

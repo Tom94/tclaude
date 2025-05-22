@@ -53,7 +53,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        print_history("> ", history)
+        print_history(" ", history)
     except json.JSONDecodeError:
         print(f"Error: Could not parse JSON file '{args.path}'.")
     except Exception as e:

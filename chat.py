@@ -158,7 +158,9 @@ async def main():
 
             total_tokens += tokens
 
-            session_name = history_to_string("", [message])
+            session_name = history_to_string([message], pretty=False)
+
+            print(f"Session name: {session_name}")
 
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
             session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -

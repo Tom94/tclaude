@@ -8,7 +8,7 @@ import os
 import sys
 
 from common import prompt
-from print import history_to_pretty_string
+from print import history_to_pretty_string, history_to_string
 from prompt import get_anthropic_response, TokenCounter
 
 
@@ -30,19 +30,14 @@ async def main():
 
     args = parser.parse_args()
 
+    if not sys.stdin.isatty():
+        print(f"{sys.argv[0]} should only be run in interactive mode. Use prompt.py otherwise.")
+        return
+
     # Get user input from arguments or stdin
     user_input = ""
-    is_repl = False
     if args.input:
         user_input = " ".join(args.input)
-    elif not sys.stdin.isatty() and not sys.stdin.closed:
-        user_input = sys.stdin.read().strip()
-    else:
-        is_repl = sys.stdin.isatty()
-
-    if not user_input and not is_repl:
-        print("No input provided.")
-        return
 
     # Read system prompt from file if provided
     system_prompt = None
@@ -74,10 +69,12 @@ async def main():
 
     try:
         while True:
-            if is_repl:
+            if not user_input:
                 user_input = input(prompt(True)).strip()
                 if not user_input:
                     continue
+            else:
+                print(f"{prompt(True)}{user_input}")
 
             num_newlines_printed = 0
 
@@ -122,34 +119,30 @@ async def main():
             _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(args.model)
             write_cache = cache_read_cost < input_cost
 
-            if is_repl:
-                # An empty line between each prompt
-                print()
-                print()
+            # An empty line between each prompt
+            print()
+            print()
 
-                if args.verbose:
-                    tokens.print_tokens()
-                    tokens.print_cost(args.model)
-                    if write_cache:
-                        print("Next prompt will be cached.")
-                    print()
+            if args.verbose:
+                tokens.print_tokens()
+                tokens.print_cost(args.model)
+                if write_cache:
+                    print("Next prompt will be cached.")
+                print()
 
             received_response = True
-
-            if not is_repl:
-                break
+            user_input = ""
     except KeyboardInterrupt:
         pass
     except EOFError:
         pass
 
-    # Print stats and save session if in REPL mode
-    if is_repl and received_response:
+    if received_response:
         # Save updated history if session file is specified
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            _, session_name, tokens = await get_anthropic_response(
+            _, message, tokens = await get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history
@@ -160,6 +153,8 @@ async def main():
             )
 
             total_tokens += tokens
+
+            session_name = history_to_string("", [message])
 
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
             session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -

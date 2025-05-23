@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import asyncio
 import datetime
 import json
 import os
 import sys
-import requests
+import aiohttp
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
@@ -74,7 +75,7 @@ class TokenCounter:
         )
 
 
-def get_anthropic_response(
+async def get_anthropic_response(
     user_input,
     model,
     history=[],
@@ -89,8 +90,8 @@ def get_anthropic_response(
     write_cache=False,
 ):
     """
-    Send user input to Anthropic API and get the response using requests.
-    Uses streaming for incremental output.
+    Send user input to Anthropic API and get the response using aiohttp.
+    Uses async streaming for incremental output.
     """
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
@@ -160,114 +161,124 @@ def get_anthropic_response(
 
     text_response = ""
 
-    # Make the streaming request
-    response = requests.post(ANTHROPIC_API_URL, headers=headers, json=params, stream=True)
-    response.raise_for_status()
+    # Make the async streaming request
+    async with aiohttp.ClientSession() as session:
+        async with session.post(ANTHROPIC_API_URL, headers=headers, json=params) as response:
+            response.raise_for_status()
 
-    # Track if we're currently in a thinking block
-    tool_use_json = StringIO()
+            # Track if we're currently in a thinking block
+            tool_use_json = StringIO()
 
-    message = {"role": "assistant", "content": []}
-    content = message["content"]
-    message_info = {}
+            message = {"role": "assistant", "content": []}
+            content = message["content"]
+            message_info = {}
 
-    tokens = TokenCounter()
+            tokens = TokenCounter()
 
-    num_newlines_printed = 0
+            num_newlines_printed = 0
 
-    # Parse SSE stream
-    for line in response.iter_lines():
-        if not line or not line.startswith(b"data: "):
-            continue
+            # Parse SSE stream
+            while True:
+                try:
+                    line = await response.content.readline()
+                except aiohttp.ClientError as e:
+                    print(f"Error reading response: {e}")
+                    break
 
-        try:
-            data = json.loads(line[6:])
-        except json.JSONDecodeError:
-            continue
+                if not line:
+                    break
 
-        kind = data.get("type")
+                if not line.startswith(b"data: "):
+                    continue
 
-        # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
-        if kind == "message_start":
-            message_info = data.get("message", {})
+                try:
+                    data = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
 
-        elif kind == "message_delta":
-            delta = data.get("delta", {})
-            stop_reason = delta.get("stop_reason")
-            if stop_reason is not None:
-                message_info["stop_reason"] = stop_reason
+                kind = data.get("type")
 
-            usage = data.get("usage")
-            if usage:
-                turn_tokens = TokenCounter(
-                    cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
-                    cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
-                    input_tokens=usage.get("input_tokens", 0),
-                    output_tokens=usage.get("output_tokens", 0),
-                )
+                # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
+                if kind == "message_start":
+                    message_info = data.get("message", {})
 
-                tokens += turn_tokens
+                elif kind == "message_delta":
+                    delta = data.get("delta", {})
+                    stop_reason = delta.get("stop_reason")
+                    if stop_reason is not None:
+                        message_info["stop_reason"] = stop_reason
 
-        elif kind == "message_end":
-            continue
+                    usage = data.get("usage")
+                    if usage:
+                        turn_tokens = TokenCounter(
+                            cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
+                            cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+                            input_tokens=usage.get("input_tokens", 0),
+                            output_tokens=usage.get("output_tokens", 0),
+                        )
 
-        elif kind == "content_block_start":
-            index = data.get("index", 0)
-            content_block = data.get("content_block", {})
+                        tokens += turn_tokens
 
-            if index >= len(content):
-                content.extend([None] * (index - len(content) + 1))
+                elif kind == "message_end":
+                    continue
 
-            content[index] = content_block
+                elif kind == "content_block_start":
+                    index = data.get("index", 0)
+                    content_block = data.get("content_block", {})
 
-        elif kind == "content_block_delta":
-            index = data.get("index", 0)
+                    if index >= len(content):
+                        content.extend([None] * (index - len(content) + 1))
 
-            if index >= len(content):
-                raise ValueError(f"Index {index} out of range for content list")
+                    content[index] = content_block
 
-            delta = data.get("delta", {})
-            delta_type = delta.get("type")
+                elif kind == "content_block_delta":
+                    index = data.get("index", 0)
 
-            if delta_type == "thinking_delta":
-                thinking_text = delta.get("thinking", "")
-                if "thinking" not in content[index]:
-                    content[index]["thinking"] = ""
-                content[index]["thinking"] += thinking_text
+                    if index >= len(content):
+                        raise ValueError(f"Index {index} out of range for content list")
 
-            elif delta_type == "text_delta":
-                text = delta.get("text", "")
-                if "text" not in content[index]:
-                    content[index]["text"] = ""
-                content[index]["text"] += text
+                    delta = data.get("delta", {})
+                    delta_type = delta.get("type")
 
-            elif delta_type == "citations_delta":
-                citation = delta.get("citation", {})
-                if "citations" not in content[index]:
-                    content[index]["citations"] = []
-                content[index]["citations"].append(citation)
+                    if delta_type == "thinking_delta":
+                        thinking_text = delta.get("thinking", "")
+                        if "thinking" not in content[index]:
+                            content[index]["thinking"] = ""
+                        content[index]["thinking"] += thinking_text
 
-            elif delta_type == "input_json_delta":
-                partial_json = delta.get("partial_json", "")
-                tool_use_json.write(partial_json)
+                    elif delta_type == "text_delta":
+                        text = delta.get("text", "")
+                        if "text" not in content[index]:
+                            content[index]["text"] = ""
+                        content[index]["text"] += text
 
-                if tool_use_json.tell() > 0:
-                    try:
-                        content[index]["input"] = partial_loads(tool_use_json.getvalue())
-                    except:
-                        pass
+                    elif delta_type == "citations_delta":
+                        citation = delta.get("citation", {})
+                        if "citations" not in content[index]:
+                            content[index]["citations"] = []
+                        content[index]["citations"].append(citation)
 
-        if is_repl and enable_printing:
-            if is_repl:
-                # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-                wrap_width = os.get_terminal_size().columns - 1
-                to_print = history_to_pretty_string(prompt(False), [message], wrap_width=wrap_width)
+                    elif delta_type == "input_json_delta":
+                        partial_json = delta.get("partial_json", "")
+                        tool_use_json.write(partial_json)
 
-                # go up num_newlines_printed lines and erase them
-                print("\033[F" * num_newlines_printed + "\r", end="")
-                num_newlines_printed = to_print.count("\n")
+                        if tool_use_json.tell() > 0:
+                            try:
+                                content[index]["input"] = partial_loads(tool_use_json.getvalue())
+                            except:
+                                pass
 
-                print(to_print, end="", flush=True)
+                if is_repl and enable_printing:
+                    if is_repl:
+                        # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+                        wrap_width = os.get_terminal_size().columns - 1
+                        to_print = history_to_pretty_string(prompt(False), [message], wrap_width=wrap_width)
+
+                        # go up num_newlines_printed lines and erase them
+                        print("\033[F" * num_newlines_printed + "\r", end="")
+                        num_newlines_printed = to_print.count("\n")
+
+                        print(to_print, end="", flush=True)
 
     if not is_repl and enable_printing:
         print(history_to_string(prompt(False), [message]), end="", flush=True)
@@ -276,7 +287,7 @@ def get_anthropic_response(
     return message_info, text_response, tokens
 
 
-def main():
+async def main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -343,7 +354,7 @@ def main():
                     continue
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, _, tokens = get_anthropic_response(
+            _, _, tokens = await get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -397,7 +408,7 @@ def main():
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            _, session_name, tokens = get_anthropic_response(
+            _, session_name, tokens = await get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history
@@ -428,4 +439,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

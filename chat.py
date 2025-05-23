@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import requests
-import sseclient
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
@@ -86,7 +85,6 @@ def get_anthropic_response(
     enable_thinking=False,
     thinking_budget=None,
     enable_printing=True,
-    is_repl=False,
     write_cache=False,
 ):
     """
@@ -156,16 +154,10 @@ def get_anthropic_response(
         "Content-Type": "application/json",
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"
+        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14",
     }
 
     text_response = ""
-
-    def print_stream(text):
-        nonlocal text_response
-        text_response += text
-        if enable_printing:
-            print(text, end="", flush=True)
 
     # Make the streaming request
     response = requests.post(ANTHROPIC_API_URL, headers=headers, json=params, stream=True)
@@ -183,19 +175,16 @@ def get_anthropic_response(
     num_newlines_printed = 0
 
     # Parse SSE stream
-    client = sseclient.SSEClient(response)
-    for event in client.events():
-        if event.event == "ping" or not event.data:
+    for line in response.iter_lines():
+        if not line or not line.startswith(b"data: "):
             continue
 
         try:
-            data = json.loads(event.data)
+            data = json.loads(line[6:])
         except json.JSONDecodeError:
             continue
 
         kind = data.get("type")
-        if kind != event.event:
-            raise ValueError(f"Unexpected event type: {kind} != {event.event}")
 
         # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
         if kind == "message_start":
@@ -264,14 +253,15 @@ def get_anthropic_response(
                 if tool_use_json.tell() > 0:
                     content[index]["input"] = partial_loads(tool_use_json.getvalue())
 
-        # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-        to_print = history_to_pretty_string(prompt(False), [message])
+        if enable_printing:
+            # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+            to_print = history_to_pretty_string(prompt(False), [message])
 
-        # go up num_newlines_printed lines
-        print("\033[F" * num_newlines_printed + "\r", end="")
-        num_newlines_printed = to_print.count("\n")
+            # go up num_newlines_printed lines
+            print("\033[F" * num_newlines_printed + "\r", end="")
+            num_newlines_printed = to_print.count("\n")
 
-        print(to_print, end="", flush=True)
+            print(to_print, end="", flush=True)
 
     history.append(message)
     return message_info, text_response, tokens
@@ -353,7 +343,6 @@ def main():
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
-                is_repl=is_repl,
                 write_cache=write_cache,
             )
 
@@ -407,7 +396,6 @@ def main():
                 system_prompt=system_prompt,
                 enable_thinking=False,
                 enable_printing=False,
-                is_repl=False,
             )
 
             total_tokens += tokens

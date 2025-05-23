@@ -252,14 +252,18 @@ def get_anthropic_response(
                 tool_use_json.write(partial_json)
 
                 if tool_use_json.tell() > 0:
-                    content[index]["input"] = partial_loads(tool_use_json.getvalue())
+                    try:
+                        content[index]["input"] = partial_loads(tool_use_json.getvalue())
+                    except:
+                        pass
 
         if is_repl and enable_printing:
             if is_repl:
                 # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-                to_print = history_to_pretty_string(prompt(False), [message])
+                wrap_width = os.get_terminal_size().columns - 1
+                to_print = history_to_pretty_string(prompt(False), [message], wrap_width=wrap_width)
 
-                # go up num_newlines_printed lines
+                # go up num_newlines_printed lines and erase them
                 print("\033[F" * num_newlines_printed + "\r", end="")
                 num_newlines_printed = to_print.count("\n")
 

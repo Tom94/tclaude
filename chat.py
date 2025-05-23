@@ -8,6 +8,7 @@ import sys
 
 from anthropic import Anthropic
 from io import StringIO
+from partial_json_parser import loads as partial_loads
 
 from common import prompt
 from print import history_to_pretty_string
@@ -89,6 +90,8 @@ def get_anthropic_response(
         current_content_block = None
         current_server_tool = None
         tool_use_json = StringIO()
+        last_tool_input_length = 0
+
         for event in stream:
             # Handle different event types
             if event.type == "content_block_start":
@@ -107,10 +110,14 @@ def get_anthropic_response(
                         in_thinking_section = True
                 elif event.content_block.type == "server_tool_use":
                     tool_use_json = StringIO()
-                    if event.content_block.name == "web_search":
+                    last_tool_input_length = 0
+
+                    current_server_tool = event.content_block.name
+                    if current_server_tool == "web_search":
                         print_stream(f"# Searching the web for: ")
-                    elif event.content_block.name == "code_execution":
+                    elif current_server_tool == "code_execution":
                         print_stream(f"# Executing code...\n\n")
+                        print_stream(f"```python\n")
                 elif event.content_block.type == "web_search_tool_result":
                     print_stream(f"## Web search results\n\n")
                     for c in event.content_block.content:
@@ -130,6 +137,18 @@ def get_anthropic_response(
                     print_stream(event.delta.text)
                 elif event.delta.type == "input_json_delta":
                     tool_use_json.write(event.delta.partial_json)
+                    if tool_use_json.tell() > 0:
+                        tool_use: dict = partial_loads(tool_use_json.getvalue())  # type: ignore
+
+                        tool_input = ""
+                        if current_server_tool == "web_search":
+                            tool_input = tool_use.get("query", "")
+                        elif current_server_tool == "code_execution":
+                            tool_input = tool_use.get("code", "")
+
+                        if len(tool_input) > last_tool_input_length:
+                            print_stream(tool_input[last_tool_input_length:])
+                            last_tool_input_length = len(tool_input)
 
             elif event.type == "content_block_stop":
                 if event.content_block.type == "thinking":
@@ -139,9 +158,9 @@ def get_anthropic_response(
                 elif event.content_block.type == "server_tool_use":
                     tool_use = json.loads(tool_use_json.getvalue())
                     if event.content_block.name == "web_search":
-                        print_stream(tool_use.get("query", ""))
+                        pass
                     elif event.content_block.name == "code_execution":
-                        print_stream(f"```python\n{tool_use.get('code', '')}\n```")
+                        print_stream(f"\n```")
 
         # Get the final message with all content
         final_message = stream.get_final_message()

@@ -4,10 +4,44 @@
 PROMPT = " "
 
 
-def prompt(pretty: bool):
+def prompt(prefix: str, pretty: bool) -> str:
+    result = f"{prefix}{PROMPT}"
     if pretty:
-        return f"\033[1;35m{PROMPT}\033[0m"
-    return PROMPT
+        # result = f"\033[1;35m{result}\033[0m"
+        result = f"\033[35m{result}\033[0m"
+    return result
+
+
+def friendly_model_name(model: str) -> str:
+    """
+    Convert a model name to a more user-friendly format.
+    """
+    if not model.startswith("claude-"):
+        return model
+
+    kind = None
+    if "opus" in model:
+        kind = "opus"
+    elif "sonnet" in model:
+        kind = "sonnet"
+    elif "haiku" in model:
+        kind = "haiku"
+
+    if kind is None:
+        return model
+
+    # Double-digit versions first, then single-digit
+    version = None
+    if "3-7" in model:
+        version = "3.7"
+    elif "3-5" in model:
+        version = "3.5"
+    elif "3" in model:
+        version = "3.0"
+    elif "4" in model:
+        version = "4.0"
+
+    return f"{kind} {version}"
 
 
 def pretty_print_md(string):

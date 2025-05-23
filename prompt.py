@@ -10,8 +10,7 @@ import aiohttp
 from io import StringIO
 from partial_json_parser import loads as partial_loads
 
-from common import prompt
-from print import history_to_pretty_string, history_to_string
+from print import history_to_string
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -320,7 +319,7 @@ async def main():
         thinking_budget=args.thinking_budget,
     )
 
-    print(history_to_string(prompt(False), [message]), end="", flush=True)
+    print(history_to_string([message], pretty=False), end="", flush=True)
 
 
 if __name__ == "__main__":

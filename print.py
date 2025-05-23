@@ -16,7 +16,7 @@ def to_superscript(text: str | int) -> str:
     return text.translate(superscript_map)
 
 
-def history_to_string(prompt, history):
+def history_to_string(history, pretty, wrap_width: int | None = None):
     io = StringIO()
     for message in history:
         if message["role"] == "system":
@@ -25,7 +25,7 @@ def history_to_string(prompt, history):
                 if content_block.type == "text":
                     io.write(f"{content_block.text}\n")
         elif message["role"] == "user":
-            io.write(f"{prompt}{message['content'][0]['text']}\n")
+            io.write(f"{common.prompt('', pretty)}{message['content'][0]['text']}\n")
         elif message["role"] == "assistant":
             references = {}
 
@@ -72,7 +72,7 @@ def history_to_string(prompt, history):
                     io.write(f"```{block_type}\n{content_block}\n```")
 
                 if content_block and content_block.get("type") == "text" and content_block.get("citations"):
-                    superscripts = []
+                    superscripts = set()
                     for citation in content_block["citations"]:
                         if citation.get("type") != "web_search_result_location":
                             continue
@@ -83,27 +83,36 @@ def history_to_string(prompt, history):
                         if not url in references:
                             references[url] = {
                                 "title": citation.get("title", ""),
-                                "cited_texts": [],
+                                "cited_texts": set(),
                                 "id": len(references) + 1,
                             }
 
                         reference = references[url]
                         if "cited_text" in citation:
-                            reference["cited_texts"].append(citation["cited_text"])
+                            reference["cited_texts"].add(citation["cited_text"])
 
-                        superscripts.append(str(reference["id"]))
+                        superscripts.add(str(reference["id"]))
 
-                    io.write(f"{to_superscript(','.join(superscripts))}")
+                    io.write(f"{to_superscript(','.join(sorted(superscripts)))}")
 
             if block_type is not None:
                 io.write("\n\n")
 
             if references:
                 for k, v in sorted(references.items(), key=lambda x: x[1]["id"]):
-                    io.write(f"{to_superscript(v['id'])}: {v['title']} - {k}\n")
+                    io.write(f"{to_superscript(v['id'])} {k} - {v['title']}\n")
+                    for val in sorted(v["cited_texts"]):
+                        io.write(f"   \"{val}\"\n")
                 io.write("\n")
 
-    return io.getvalue().rstrip()
+    result = io.getvalue().rstrip()
+    if wrap_width is not None:
+        result = word_wrap(result, wrap_width)
+
+    if pretty:
+        result = common.pretty_print_md(result)
+
+    return result
 
 
 def word_wrap(text: str, width: int) -> str:
@@ -118,13 +127,6 @@ def word_wrap(text: str, width: int) -> str:
             wrapped_text.write(line)
         wrapped_text.write("\n")
     return wrapped_text.getvalue().rstrip()
-
-
-def history_to_pretty_string(prompt, history, wrap_width: int | None = None):
-    result = history_to_string(prompt, history)
-    if wrap_width is not None:
-        result = word_wrap(result, wrap_width)
-    return common.pretty_print_md(result)
 
 
 def main():
@@ -151,7 +153,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        result = history_to_string(common.prompt(args.pretty), history)
+        result = history_to_string(history, pretty=args.pretty)
         if args.pretty:
             result = common.pretty_print_md(result)
         print(result, end="", flush=True)

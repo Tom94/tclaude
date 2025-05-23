@@ -7,8 +7,8 @@ import json
 import os
 import sys
 
-from common import prompt
-from print import history_to_pretty_string, history_to_string
+import common
+from print import history_to_string
 from prompt import get_anthropic_response, TokenCounter
 
 
@@ -55,7 +55,7 @@ async def main():
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
-                print(history_to_pretty_string(prompt(True), history), "\n")
+                print(history_to_string(history, pretty=True), "\n")
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
@@ -66,15 +66,18 @@ async def main():
 
     # Initially, don't cache anything. The system prompt is always cached.
     write_cache = False
+    running_cost = 0.0
 
     try:
         while True:
+            prompt_prefix = f"${running_cost:.02f} {common.friendly_model_name(args.model)} "
+            prompt = common.prompt(prompt_prefix, True)
             if not user_input:
-                user_input = input(prompt(True)).strip()
+                user_input = input(prompt).strip()
                 if not user_input:
                     continue
             else:
-                print(f"{prompt(True)}{user_input}")
+                print(f"{prompt}{user_input}")
 
             num_newlines_printed = 0
 
@@ -82,7 +85,7 @@ async def main():
                 nonlocal num_newlines_printed
                 # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
                 wrap_width = os.get_terminal_size().columns - 1
-                to_print = history_to_pretty_string(prompt(False), [message], wrap_width=wrap_width)
+                to_print = history_to_string([message], pretty=True, wrap_width=wrap_width)
 
                 # go up num_newlines_printed lines and erase them
                 print("\033[F" * num_newlines_printed + "\r", end="")
@@ -106,6 +109,7 @@ async def main():
             )
 
             total_tokens += tokens
+            running_cost = total_tokens.total_cost(args.model)
 
             # We heuristically set a new cache breakpoint when our next prompt (if short ~0 tokens) causes the cost of input to be larger
             # than that of cache reads.

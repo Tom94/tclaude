@@ -11,7 +11,7 @@ from io import StringIO
 from partial_json_parser import loads as partial_loads
 
 from common import prompt
-from print import history_to_pretty_string
+from print import history_to_pretty_string, history_to_string
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -85,6 +85,7 @@ def get_anthropic_response(
     enable_thinking=False,
     thinking_budget=None,
     enable_printing=True,
+    is_repl=False,
     write_cache=False,
 ):
     """
@@ -253,15 +254,19 @@ def get_anthropic_response(
                 if tool_use_json.tell() > 0:
                     content[index]["input"] = partial_loads(tool_use_json.getvalue())
 
-        if enable_printing:
-            # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-            to_print = history_to_pretty_string(prompt(False), [message])
+        if is_repl and enable_printing:
+            if is_repl:
+                # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+                to_print = history_to_pretty_string(prompt(False), [message])
 
-            # go up num_newlines_printed lines
-            print("\033[F" * num_newlines_printed + "\r", end="")
-            num_newlines_printed = to_print.count("\n")
+                # go up num_newlines_printed lines
+                print("\033[F" * num_newlines_printed + "\r", end="")
+                num_newlines_printed = to_print.count("\n")
 
-            print(to_print, end="", flush=True)
+                print(to_print, end="", flush=True)
+
+    if not is_repl and enable_printing:
+        print(history_to_string(prompt(False), [message]), end="", flush=True)
 
     history.append(message)
     return message_info, text_response, tokens
@@ -343,6 +348,7 @@ def main():
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
+                is_repl=is_repl,
                 write_cache=write_cache,
             )
 

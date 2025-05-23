@@ -63,6 +63,15 @@ class TokenCounter:
         cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
         return cache_creation_cost + cache_read_cost + input_cost + output_cost
 
+    def print_tokens(self):
+        print(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
+
+    def print_cost(self, model: str):
+        cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
+        print(
+            f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}"
+        )
+
 
 def get_anthropic_response(
     user_input,
@@ -76,19 +85,39 @@ def get_anthropic_response(
     thinking_budget=None,
     enable_printing=True,
     is_repl=False,
+    write_cache=False,
 ):
     """
     Send user input to Anthropic API and get the response using the Anthropic Python client.
     Uses streaming for incremental output.
     """
-    history.append({"role": "user", "content": user_input})
+    history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
+
+    if write_cache:
+        # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use
+        MAX_NUM_CACHE_BREAKPOINTS = 4
+
+        # First remove all but the last max-1 cache_control entries
+        num_cache_breakpoints = 0
+        for message in reversed(history):
+            if not "content" in message or not isinstance(message["content"], list):
+                continue
+
+            for content in message["content"]:
+                if "cache_control" in content:
+                    # num_cache_breakpoints += 1
+                    # if num_cache_breakpoints >= MAX_NUM_CACHE_BREAKPOINTS - 1:
+                    del content["cache_control"]
+
+        # Then set a new cache breakpoint for the last message
+        history[-1]["content"][0]["cache_control"] = {"type": "ephemeral"}
 
     # Prepare request parameters
     params = {"model": model, "max_tokens": max_tokens, "messages": history}
 
-    # Add system prompt if provided
+    # Add system prompt if provided. Always cache it.
     if system_prompt:
-        params["system"] = system_prompt
+        params["system"] = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
 
     # Add extended thinking if enabled
     if enable_thinking:
@@ -113,6 +142,7 @@ def get_anthropic_response(
         tools.append(code_exec_tool)
 
     params["tools"] = tools
+    params["tool_choice"] = {"type": "auto"}
     params["extra_headers"] = {"anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"}
 
     text_response = ""
@@ -219,7 +249,9 @@ def get_anthropic_response(
             for i, citation in enumerate(citations, 1):
                 print_stream(f"\n{i}. {citation['title']} - {citation['url']}")
 
-        history.append({"role": "assistant", "content": [block.model_dump() for block in final_message.content]})
+        history.append(
+            {"role": "assistant", "content": [block.model_dump(exclude_unset=True, exclude_none=True) for block in final_message.content]}
+        )
 
         tokens = TokenCounter(
             cache_creation_input_tokens=final_message.usage.cache_creation_input_tokens or 0,
@@ -286,6 +318,9 @@ def main():
 
     received_response = False
 
+    # Initially, don't cache anything. The system prompt is always cached.
+    write_cache = False
+
     try:
         while True:
             if is_repl:
@@ -304,16 +339,36 @@ def main():
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
                 is_repl=is_repl,
+                write_cache=write_cache,
             )
+
+            total_tokens += tokens
+
+            # We heuristically set a new cache breakpoint when our next prompt (if short ~0 tokens) causes the cost of input to be larger
+            # than that of cache reads.
+            # TODO: If we just finished a web search, apparently something messy happens to the cache... should investigate
+            tokens_if_short_follow_up = TokenCounter(
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=tokens.cache_read + tokens.cache_creation,
+                input_tokens=tokens.input + tokens.output,
+                output_tokens=0,
+            )
+            _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(args.model)
+            write_cache = cache_read_cost < input_cost
 
             if is_repl:
                 # An empty line between each prompt
                 print()
                 print()
 
-            received_response = True
+                if args.verbose:
+                    tokens.print_tokens()
+                    tokens.print_cost(args.model)
+                    if write_cache:
+                        print("Next prompt will be cached.")
+                    print()
 
-            total_tokens += tokens
+            received_response = True
 
             if not is_repl:
                 break
@@ -348,22 +403,15 @@ def main():
             date = datetime.datetime.now().strftime("%Y-%m-%d")
             session_name = f"{date}-{session_name}.json"
 
-        print(f"\nSaving session as {session_name}...")
+        print(f"Saving session as {session_name}...")
         with open(session_name, "w") as f:
             json.dump(history, f, indent=2)
 
-        cache_creation_cost, cache_read_cost, input_cost, output_cost = total_tokens.cost(args.model)
-        total_cost = cache_creation_cost + cache_read_cost + input_cost + output_cost
-
         if args.verbose:
-            print(
-                f"\nTokens: cache_creation={total_tokens.cache_creation} cache_read={total_tokens.cache_read} input={total_tokens.input} output={total_tokens.output}"
-            )
-            print(
-                f"\nCost:   cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}"
-            )
+            total_tokens.print_tokens()
+            total_tokens.print_cost(args.model)
 
-        print(f"\nTotal cost: ${total_cost:.2f}")
+        print(f"Total cost: ${total_tokens.total_cost(args.model):.2f}")
 
 
 if __name__ == "__main__":

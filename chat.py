@@ -24,6 +24,46 @@ CLIENT = Anthropic()
 IS_ATTY = sys.stdout.isatty()
 
 
+class TokenCounter:
+    def __init__(self, cache_creation_input_tokens=0, cache_read_input_tokens=0, input_tokens=0, output_tokens=0):
+        self.cache_creation = cache_creation_input_tokens
+        self.cache_read = cache_read_input_tokens
+        self.input = input_tokens
+        self.output = output_tokens
+
+    def __add__(self, other):
+        result = TokenCounter()
+        result.cache_creation = self.cache_creation + other.cache_creation
+        result.cache_read = self.cache_read + other.cache_read
+        result.input = self.input + other.input
+        result.output = self.output + other.output
+        return result
+
+    def cost(self, model: str):
+        cost_factor = 1.0
+        if "opus" in model:
+            cost_factor = 5.0
+        elif "haiku" in model:
+            cost_factor = 1.0 / 3.75
+
+        # See https://docs.anthropic.com/en/docs/about-claude/models/overview#model-pricing
+        price_per_minput_cache_creation = 3.75 * cost_factor
+        price_per_minput_cache_read = 0.3 * cost_factor
+        price_per_minput = 3.0 * cost_factor
+        price_per_moutput = 15.0 * cost_factor
+
+        cache_creation_cost = (self.cache_creation / 1000000) * price_per_minput_cache_creation
+        cache_read_cost = (self.cache_read / 1000000) * price_per_minput_cache_read
+        input_cost = (self.input / 1000000) * price_per_minput
+        output_cost = (self.output / 1000000) * price_per_moutput
+
+        return cache_creation_cost, cache_read_cost, input_cost, output_cost
+
+    def total_cost(self, model: str) -> float:
+        cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
+        return cache_creation_cost + cache_read_cost + input_cost + output_cost
+
+
 def get_anthropic_response(
     user_input,
     model,
@@ -181,7 +221,13 @@ def get_anthropic_response(
 
         history.append({"role": "assistant", "content": [block.model_dump() for block in final_message.content]})
 
-        return text_response, final_message.usage.input_tokens, final_message.usage.output_tokens
+        tokens = TokenCounter(
+            cache_creation_input_tokens=final_message.usage.cache_creation_input_tokens or 0,
+            cache_read_input_tokens=final_message.usage.cache_read_input_tokens or 0,
+            input_tokens=final_message.usage.input_tokens,
+            output_tokens=final_message.usage.output_tokens,
+        )
+        return text_response, tokens
 
 
 def main():
@@ -236,8 +282,7 @@ def main():
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
 
-    total_input_tokens = 0
-    total_output_tokens = 0
+    total_tokens = TokenCounter()
 
     received_response = False
 
@@ -249,7 +294,7 @@ def main():
                     continue
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, input_tokens, output_tokens = get_anthropic_response(
+            _, tokens = get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -268,8 +313,7 @@ def main():
 
             received_response = True
 
-            total_input_tokens += input_tokens
-            total_output_tokens += output_tokens
+            total_tokens += tokens
 
             if not is_repl:
                 break
@@ -280,24 +324,11 @@ def main():
 
     # Print stats and save session if in REPL mode
     if is_repl and received_response:
-        # Cost (https://docs.anthropic.com/en/docs/about-claude/pricing -- no caching yet, but maybe not needed for simple chat)
-        price_per_minput = 3.0
-        price_per_moutput = 15.0
-        input_tokens_cost = (total_input_tokens / 1000000) * price_per_minput
-        output_tokens_cost = (total_output_tokens / 1000000) * price_per_moutput
-        total_cost = input_tokens_cost + output_tokens_cost
-
-        if args.verbose:
-            print(f"\nTokens: input={total_input_tokens} output={total_output_tokens}")
-            print(f"\nCost: input=${input_tokens_cost:.2f} output=${output_tokens_cost:.2f} total=${total_cost:.2f}")
-
-        print(f"\nTotal cost: ${total_cost:.2f}")
-
         # Save updated history if session file is specified
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            session_name, input_tokens, output_tokens = get_anthropic_response(
+            session_name, tokens = get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history
@@ -309,6 +340,8 @@ def main():
                 is_repl=False,
             )
 
+            total_tokens += tokens
+
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
             session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
 
@@ -318,6 +351,19 @@ def main():
         print(f"\nSaving session as {session_name}...")
         with open(session_name, "w") as f:
             json.dump(history, f, indent=2)
+
+        cache_creation_cost, cache_read_cost, input_cost, output_cost = total_tokens.cost(args.model)
+        total_cost = cache_creation_cost + cache_read_cost + input_cost + output_cost
+
+        if args.verbose:
+            print(
+                f"\nTokens: cache_creation={total_tokens.cache_creation} cache_read={total_tokens.cache_read} input={total_tokens.input} output={total_tokens.output}"
+            )
+            print(
+                f"\nCost:   cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}"
+            )
+
+        print(f"\nTotal cost: ${total_cost:.2f}")
 
 
 if __name__ == "__main__":

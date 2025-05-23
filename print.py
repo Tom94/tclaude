@@ -20,28 +20,91 @@ def history_to_string(prompt, history):
         elif message["role"] == "user":
             io.write(f"{prompt}{message['content'][0]['text']}\n")
         elif message["role"] == "assistant":
+            citations = []
+
             block_type = None
             for content_block in message["content"]:
                 if block_type is not None and block_type != content_block["type"]:
                     io.write(f"\n\n")
-                block_type = content_block["type"]
 
-                if content_block["type"] == "thinking":
+                block_type = content_block.get("type")
+
+                if block_type == "thinking":
                     io.write(f"```thinking\n{content_block['thinking']}\n```")
-                elif content_block["type"] == "text":
+                elif block_type == "text":
                     io.write(f"{content_block['text']}")
+                elif block_type == "server_tool_use":
+                    name = content_block.get("name")
+                    if name == "web_search":
+                        io.write(f"Searching the web for `{content_block.get("input", {}).get("query", "<unknown>")}`.")
+                    elif name == "code_execution":
+                        # It's always Python, see https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
+                        io.write(f"Running the following Python code:\n\n")
+                        io.write(f"```python\n{content_block.get("input", {}).get("code", "<unknown>")}\n```")
+                    else:
+                        io.write(f"Unknown tool: {name}")
+                elif block_type == "web_search_tool_result":
+                    io.write(f"Found {len(content_block.get("content", []))} results.")
+                elif block_type == "code_execution_tool_result":
+                    output = content_block.get("content", {})
+
+                    if output:
+                        return_code = output.get("return_code", 0)
+                        if return_code != 0:
+                            io.write(f"Code execution failed with return code {return_code}.")
+
+                        stdout = output.get("stdout", "")
+                        if stdout:
+                            io.write(f"```stdout\n{stdout.strip()}\n```")
+
+                        stderr = output.get("stderr", "")
+                        if stderr:
+                            io.write(f"```stderr\n{stderr.strip()}\n```")
+
                 else:
-                    io.write(f"```{content_block['type']}\n{content_block}\n```")
+                    io.write(f"```{block_type}\n{content_block}\n```")
+
+                if content_block and content_block.get("type") == "text" and content_block.get("citations"):
+                    for citation in content_block["citations"]:
+                        if citation.get("type") == "web_search_result_location":
+                            citations.append(
+                                {
+                                    "url": citation.get("url", ""),
+                                    "title": citation.get("title", ""),
+                                    "cited_text": citation.get("cited_text", ""),
+                                }
+                            )
 
             if block_type is not None:
                 io.write("\n\n")
 
+            if citations:
+                io.write("Sources:\n")
+                for i, citation in enumerate(citations, 1):
+                    io.write(f"{i}. {citation['title']} - {citation['url']}\n")
 
     return io.getvalue().rstrip()
 
 
-def history_to_pretty_string(prompt, history):
-    return common.pretty_print_md(history_to_string(prompt, history))
+def word_wrap(text: str, width: int) -> str:
+    """
+    Wraps the text to the specified width.
+    """
+    wrapped_text = StringIO()
+    for line in text.splitlines():
+        if len(line) > width:
+            wrapped_text.write("\n".join([line[i : i + width] for i in range(0, len(line), width)]))
+        else:
+            wrapped_text.write(line)
+        wrapped_text.write("\n")
+    return wrapped_text.getvalue().rstrip()
+
+
+def history_to_pretty_string(prompt, history, wrap_width: int | None = None):
+    result = history_to_string(prompt, history)
+    if wrap_width is not None:
+        result = word_wrap(result, wrap_width)
+    return common.pretty_print_md(result)
 
 
 def main():

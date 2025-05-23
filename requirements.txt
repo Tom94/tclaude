@@ -1,3 +1,4 @@
-anthropic
 partial-json-parser
+requests
+sseclient-py
 

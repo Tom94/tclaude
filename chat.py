@@ -5,8 +5,9 @@ import datetime
 import json
 import os
 import sys
+import requests
+import sseclient
 
-from anthropic import Anthropic
 from io import StringIO
 from partial_json_parser import loads as partial_loads
 
@@ -18,8 +19,9 @@ MAX_SEARCH_USES = 5
 ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
 BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
-# Initialize the Anthropic client
-CLIENT = Anthropic()
+# Anthropic API configuration
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 IS_ATTY = sys.stdout.isatty()
 
@@ -88,9 +90,12 @@ def get_anthropic_response(
     write_cache=False,
 ):
     """
-    Send user input to Anthropic API and get the response using the Anthropic Python client.
+    Send user input to Anthropic API and get the response using requests.
     Uses streaming for incremental output.
     """
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+
     history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
 
     if write_cache:
@@ -114,7 +119,7 @@ def get_anthropic_response(
         history[-1]["content"][0]["cache_control"] = {"type": "ephemeral"}
 
     # Prepare request parameters
-    params = {"model": model, "max_tokens": max_tokens, "messages": history}
+    params = {"model": model, "max_tokens": max_tokens, "messages": history, "stream": True}
 
     # Add system prompt if provided. Always cache it.
     if system_prompt:
@@ -142,157 +147,134 @@ def get_anthropic_response(
         code_exec_tool = {"type": "code_execution_20250522", "name": "code_execution"}
         tools.append(code_exec_tool)
 
-    params["tools"] = tools
-    params["tool_choice"] = {"type": "auto"}
-    params["extra_headers"] = {"anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"}
+    if tools:
+        params["tools"] = tools
+        params["tool_choice"] = {"type": "auto"}
+
+    # Prepare headers
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"
+    }
 
     text_response = ""
-    with CLIENT.messages.create(**params, stream=True) as stream:
-        # Track if we're currently in a thinking block
-        in_thinking_section = False
 
-        def print_stream(text):
-            nonlocal text_response
-            text_response += text
-            if enable_printing:
-                print(text, end="", flush=True)
+    def print_stream(text):
+        nonlocal text_response
+        text_response += text
+        if enable_printing:
+            print(text, end="", flush=True)
 
-        # Process each event in the stream
-        current_content_block = None
-        current_server_tool = None
-        tool_use_json = StringIO()
-        last_tool_input_length = 0
+    # Make the streaming request
+    response = requests.post(ANTHROPIC_API_URL, headers=headers, json=params, stream=True)
+    response.raise_for_status()
 
-        message = {"role": "assistant", "content": []}
-        content = message["content"]
-        message_info = {}
+    # Track if we're currently in a thinking block
+    tool_use_json = StringIO()
 
-        tokens = TokenCounter()
+    message = {"role": "assistant", "content": []}
+    content = message["content"]
+    message_info = {}
 
-        for event in stream:
-            if event.type == "message_start":
-                message_info = event.message
-            elif event.type == "message_delta":
-                if event.delta.stop_reason:
-                    print(f"Reason: {event.delta.stop_reason}")
+    tokens = TokenCounter()
 
-                if event.usage:
-                    turn_tokens = TokenCounter(
-                        cache_creation_input_tokens=event.usage.cache_creation_input_tokens or 0,
-                        cache_read_input_tokens=event.usage.cache_read_input_tokens or 0,
-                        input_tokens=event.usage.input_tokens or 0,
-                        output_tokens=event.usage.output_tokens or 0,
-                    )
+    num_newlines_printed = 0
 
-                    tokens += turn_tokens
+    # Parse SSE stream
+    client = sseclient.SSEClient(response)
+    for event in client.events():
+        if event.event == "ping" or not event.data:
+            continue
 
-            elif event.type == "message_end":
-                print("Done!")
+        try:
+            data = json.loads(event.data)
+        except json.JSONDecodeError:
+            continue
 
-            # Handle different event types
-            elif event.type == "content_block_start":
-                if event.index >= len(content):
-                    content.extend([None] * (event.index - len(content) + 1))
-                    content[event.index] = event.content_block
+        kind = data.get("type")
+        if kind != event.event:
+            raise ValueError(f"Unexpected event type: {kind} != {event.event}")
 
-                if current_content_block is not None and current_content_block != event.content_block.type:
-                    print_stream("\n\n")
+        # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
+        if kind == "message_start":
+            message_info = data.get("message", {})
 
-                current_content_block = event.content_block.type
+        elif kind == "message_delta":
+            delta = data.get("delta", {})
+            stop_reason = delta.get("stop_reason")
+            if stop_reason is not None:
+                message_info["stop_reason"] = stop_reason
 
-                # Print the start of a new content block
-                if event.content_block.type == "thinking":
-                    print_stream("# Thought process\n\n")
-                    in_thinking_section = True
-                elif event.content_block.type == "text":
-                    if in_thinking_section:
-                        print_stream("# Thoughtful response\n\n")
-                        in_thinking_section = True
-                elif event.content_block.type == "server_tool_use":
-                    tool_use_json = StringIO()
-                    last_tool_input_length = 0
+            usage = data.get("usage")
+            if usage:
+                turn_tokens = TokenCounter(
+                    cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
+                    cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                )
 
-                    current_server_tool = event.content_block.name
-                    if current_server_tool == "web_search":
-                        print_stream(f"# Searching the web for: ")
-                    elif current_server_tool == "code_execution":
-                        print_stream(f"# Executing code...\n\n")
-                        print_stream(f"```python\n")
-                elif event.content_block.type == "web_search_tool_result":
-                    print_stream(f"## Web search results\n\n")
-                    for c in event.content_block.content:
-                        print_stream(f"{c.title} - {c.url}\n")
-                elif event.content_block.type == "code_execution_tool_result":
-                    stdout = event.content_block.content.get("stdout", "")
-                    stderr = event.content_block.content.get("stderr", "")
-                    if stdout:
-                        print_stream(f"## stdout\n\n{event.content_block.content['stdout']}")
-                    if stderr:
-                        print_stream(f"## stderr\n\n{event.content_block.content['stderr']}")
+                tokens += turn_tokens
 
-            elif event.type == "content_block_delta":
-                if event.delta.type == "thinking_delta":
-                    content[event.index].thinking += event.delta.thinking
+        elif kind == "message_end":
+            continue
 
-                    print_stream(event.delta.thinking)
-                elif event.delta.type == "text_delta":
-                    content[event.index].text += event.delta.text
+        elif kind == "content_block_start":
+            index = data.get("index", 0)
+            content_block = data.get("content_block", {})
 
-                    print_stream(event.delta.text)
-                elif event.delta.type == "citations_delta":
-                    content[event.index].citations.append(event.delta.citation)
+            if index >= len(content):
+                content.extend([None] * (index - len(content) + 1))
 
-                elif event.delta.type == "input_json_delta":
-                    # content[event.index].input_json += event.delta.partial_json
+            content[index] = content_block
 
-                    tool_use_json.write(event.delta.partial_json)
-                    if tool_use_json.tell() > 0:
-                        tool_use: dict = partial_loads(tool_use_json.getvalue())  # type: ignore
+        elif kind == "content_block_delta":
+            index = data.get("index", 0)
 
-                        tool_input = ""
-                        if current_server_tool == "web_search":
-                            tool_input = tool_use.get("query", "")
-                        elif current_server_tool == "code_execution":
-                            tool_input = tool_use.get("code", "")
+            if index >= len(content):
+                raise ValueError(f"Index {index} out of range for content list")
 
-                        if len(tool_input) > last_tool_input_length:
-                            print_stream(tool_input[last_tool_input_length:])
-                            last_tool_input_length = len(tool_input)
+            delta = data.get("delta", {})
+            delta_type = delta.get("type")
 
-            elif event.type == "content_block_stop":
-                cb = content[event.index]
-                if cb.type == "thinking":
-                    pass
-                elif cb.type == "text":
-                    pass
-                elif cb.type == "server_tool_use":
-                    tool_use = json.loads(tool_use_json.getvalue())
-                    content[event.index].input = tool_use
-                    if cb.name == "web_search":
-                        pass
-                    elif cb.name == "code_execution":
-                        print_stream(f"\n```")
+            if delta_type == "thinking_delta":
+                thinking_text = delta.get("thinking", "")
+                if "thinking" not in content[index]:
+                    content[index]["thinking"] = ""
+                content[index]["thinking"] += thinking_text
 
+            elif delta_type == "text_delta":
+                text = delta.get("text", "")
+                if "text" not in content[index]:
+                    content[index]["text"] = ""
+                content[index]["text"] += text
 
-        citations = []
-        if enable_web_search:
-            # Extract citations from the response
-            for content_block in content:
-                if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
-                    for citation in content_block.citations:
-                        if hasattr(citation, "type") and citation.type == "web_search_result_location":
-                            citations.append({"url": citation.url, "title": citation.title, "cited_text": citation.cited_text})
+            elif delta_type == "citations_delta":
+                citation = delta.get("citation", {})
+                if "citations" not in content[index]:
+                    content[index]["citations"] = []
+                content[index]["citations"].append(citation)
 
-        if citations:
-            print_stream("\n\nSources:")
-            for i, citation in enumerate(citations, 1):
-                print_stream(f"\n{i}. {citation['title']} - {citation['url']}")
+            elif delta_type == "input_json_delta":
+                partial_json = delta.get("partial_json", "")
+                tool_use_json.write(partial_json)
 
-        for i, cb in enumerate(content):
-            content[i] = cb.model_dump()
-        history.append(message)
+                if tool_use_json.tell() > 0:
+                    content[index]["input"] = partial_loads(tool_use_json.getvalue())
 
-        return text_response, tokens
+        # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+        to_print = history_to_pretty_string(prompt(False), [message])
+
+        # go up num_newlines_printed lines
+        print("\033[F" * num_newlines_printed + "\r", end="")
+        num_newlines_printed = to_print.count("\n")
+
+        print(to_print, end="", flush=True)
+
+    history.append(message)
+    return message_info, text_response, tokens
 
 
 def main():
@@ -362,7 +344,7 @@ def main():
                     continue
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, tokens = get_anthropic_response(
+            _, _, tokens = get_anthropic_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -416,7 +398,7 @@ def main():
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            session_name, tokens = get_anthropic_response(
+            _, session_name, tokens = get_anthropic_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history

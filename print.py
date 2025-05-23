@@ -18,22 +18,24 @@ def history_to_string(prompt, history):
                 if content_block.type == "text":
                     io.write(f"{content_block.text}\n")
         elif message["role"] == "user":
-            io.write(f"{prompt}{message['content']}\n")
+            io.write(f"{prompt}{message['content'][0]['text']}\n")
         elif message["role"] == "assistant":
-            had_thinking = False
+            block_type = None
             for content_block in message["content"]:
+                if block_type is not None and block_type != content_block["type"]:
+                    io.write(f"\n\n")
+                block_type = content_block["type"]
+
                 if content_block["type"] == "thinking":
-                    io.write(f"\n# Thought process\n{content_block['thinking']}\n\n")
+                    io.write(f"```thinking\n{content_block['thinking']}\n```")
+                elif content_block["type"] == "text":
+                    io.write(f"{content_block['text']}")
+                else:
+                    io.write(f"```{content_block['type']}\n{content_block}\n```")
 
-                    had_thinking = True
+            if block_type is not None:
+                io.write("\n\n")
 
-            for content_block in message["content"]:
-                if content_block["type"] == "text":
-                    if had_thinking:
-                        io.write(f"\n# Thoughtful response\n{content_block['text']}\n\n")
-                    else:
-                        io.write(f"{content_block['text']}\n")
-                    io.write("\n")
 
     return io.getvalue().rstrip()
 

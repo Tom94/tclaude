@@ -95,7 +95,8 @@ def get_anthropic_response(
 
     if write_cache:
         # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use
-        MAX_NUM_CACHE_BREAKPOINTS = 4
+        # We set the maximum to the docs-specified 4 minus one for the system prompt.
+        MAX_NUM_CACHE_BREAKPOINTS = 4 - 1
 
         # First remove all but the last max-1 cache_control entries
         num_cache_breakpoints = 0
@@ -105,9 +106,9 @@ def get_anthropic_response(
 
             for content in message["content"]:
                 if "cache_control" in content:
-                    # num_cache_breakpoints += 1
-                    # if num_cache_breakpoints >= MAX_NUM_CACHE_BREAKPOINTS - 1:
-                    del content["cache_control"]
+                    num_cache_breakpoints += 1
+                    if num_cache_breakpoints >= MAX_NUM_CACHE_BREAKPOINTS - 1:
+                        del content["cache_control"]
 
         # Then set a new cache breakpoint for the last message
         history[-1]["content"][0]["cache_control"] = {"type": "ephemeral"}
@@ -146,7 +147,7 @@ def get_anthropic_response(
     params["extra_headers"] = {"anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14"}
 
     text_response = ""
-    with CLIENT.messages.stream(**params) as stream:
+    with CLIENT.messages.create(**params, stream=True) as stream:
         # Track if we're currently in a thinking block
         in_thinking_section = False
 
@@ -162,9 +163,38 @@ def get_anthropic_response(
         tool_use_json = StringIO()
         last_tool_input_length = 0
 
+        message = {"role": "assistant", "content": []}
+        content = message["content"]
+        message_info = {}
+
+        tokens = TokenCounter()
+
         for event in stream:
+            if event.type == "message_start":
+                message_info = event.message
+            elif event.type == "message_delta":
+                if event.delta.stop_reason:
+                    print(f"Reason: {event.delta.stop_reason}")
+
+                if event.usage:
+                    turn_tokens = TokenCounter(
+                        cache_creation_input_tokens=event.usage.cache_creation_input_tokens or 0,
+                        cache_read_input_tokens=event.usage.cache_read_input_tokens or 0,
+                        input_tokens=event.usage.input_tokens or 0,
+                        output_tokens=event.usage.output_tokens or 0,
+                    )
+
+                    tokens += turn_tokens
+
+            elif event.type == "message_end":
+                print("Done!")
+
             # Handle different event types
-            if event.type == "content_block_start":
+            elif event.type == "content_block_start":
+                if event.index >= len(content):
+                    content.extend([None] * (event.index - len(content) + 1))
+                    content[event.index] = event.content_block
+
                 if current_content_block is not None and current_content_block != event.content_block.type:
                     print_stream("\n\n")
 
@@ -202,10 +232,19 @@ def get_anthropic_response(
 
             elif event.type == "content_block_delta":
                 if event.delta.type == "thinking_delta":
+                    content[event.index].thinking += event.delta.thinking
+
                     print_stream(event.delta.thinking)
                 elif event.delta.type == "text_delta":
+                    content[event.index].text += event.delta.text
+
                     print_stream(event.delta.text)
+                elif event.delta.type == "citations_delta":
+                    content[event.index].citations.append(event.delta.citation)
+
                 elif event.delta.type == "input_json_delta":
+                    # content[event.index].input_json += event.delta.partial_json
+
                     tool_use_json.write(event.delta.partial_json)
                     if tool_use_json.tell() > 0:
                         tool_use: dict = partial_loads(tool_use_json.getvalue())  # type: ignore
@@ -221,24 +260,24 @@ def get_anthropic_response(
                             last_tool_input_length = len(tool_input)
 
             elif event.type == "content_block_stop":
-                if event.content_block.type == "thinking":
+                cb = content[event.index]
+                if cb.type == "thinking":
                     pass
-                elif event.content_block.type == "text":
+                elif cb.type == "text":
                     pass
-                elif event.content_block.type == "server_tool_use":
+                elif cb.type == "server_tool_use":
                     tool_use = json.loads(tool_use_json.getvalue())
-                    if event.content_block.name == "web_search":
+                    content[event.index].input = tool_use
+                    if cb.name == "web_search":
                         pass
-                    elif event.content_block.name == "code_execution":
+                    elif cb.name == "code_execution":
                         print_stream(f"\n```")
 
-        # Get the final message with all content
-        final_message = stream.get_final_message()
 
         citations = []
         if enable_web_search:
             # Extract citations from the response
-            for content_block in final_message.content:
+            for content_block in content:
                 if content_block.type == "text" and hasattr(content_block, "citations") and content_block.citations:
                     for citation in content_block.citations:
                         if hasattr(citation, "type") and citation.type == "web_search_result_location":
@@ -249,16 +288,10 @@ def get_anthropic_response(
             for i, citation in enumerate(citations, 1):
                 print_stream(f"\n{i}. {citation['title']} - {citation['url']}")
 
-        history.append(
-            {"role": "assistant", "content": [block.model_dump(exclude_unset=True, exclude_none=True) for block in final_message.content]}
-        )
+        for i, cb in enumerate(content):
+            content[i] = cb.model_dump()
+        history.append(message)
 
-        tokens = TokenCounter(
-            cache_creation_input_tokens=final_message.usage.cache_creation_input_tokens or 0,
-            cache_read_input_tokens=final_message.usage.cache_read_input_tokens or 0,
-            input_tokens=final_message.usage.input_tokens,
-            output_tokens=final_message.usage.output_tokens,
-        )
         return text_response, tokens
 
 

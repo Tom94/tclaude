@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import aiohttp
+import subprocess
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
@@ -77,21 +78,31 @@ class TokenCounter:
         )
 
 
-def get_endpoint_vertex(model: str):
-    if not VERTEX_API_KEY or not VERTEX_API_PROJECT:
-        raise ValueError("VERTEX_API_KEY and VERTEX_API_PROJECT environment variables are required")
+def get_gcp_access_token():
+    cmd = ["gcloud", "auth", "print-access-token"]
+    token = subprocess.check_output(cmd).decode("utf-8").strip()
+    return token
+
+
+def get_endpoint_vertex(model: str) -> tuple:
+    if not VERTEX_API_PROJECT:
+        raise ValueError("VERTEX_API_PROJECT environment variables are required")
 
     # Prepare headers
     headers = {
+        "Authorization": f"Bearer {get_gcp_access_token()}",
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {VERTEX_API_KEY}",
     }
 
-    url = f"https://aiplatform.googleapis.com/v1/projects/{VERTEX_API_PROJECT}/locations/global/publishers/google/models/{model}:generateContent"
-    return url, headers
+    url = f"https://aiplatform.googleapis.com/v1/projects/{VERTEX_API_PROJECT}/locations/global/publishers/anthropic/models/{model}:streamRawPredict"
+    params = {
+        "anthropic_version": "vertex-2023-10-16",
+    }
+
+    return url, headers, params
 
 
-def get_endpoint_anthropic():
+def get_endpoint_anthropic(model: str) -> tuple:
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 
@@ -104,7 +115,11 @@ def get_endpoint_anthropic():
     }
 
     url = ANTHROPIC_API_URL
-    return url, headers
+    params = {
+        "model": model,
+    }
+
+    return url, headers, params
 
 
 async def stream_events(url, headers, params):
@@ -141,8 +156,8 @@ async def stream_response(
     Uses async streaming for incremental output.
     """
 
-    url, headers = get_endpoint_anthropic()
-    # url, headers = get_endpoint_vertex("claude-sonnet-4@20250514")
+    url, headers, params = get_endpoint_anthropic(model)
+    # url, headers, params = get_endpoint_vertex("claude-sonnet-4@20250514")
 
     history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
 
@@ -171,7 +186,9 @@ async def stream_response(
     history_to_submit = [{"role": m["role"], "content": m["content"]} for m in history]
 
     # Prepare request parameters
-    params = {"model": model, "max_tokens": max_tokens, "messages": history_to_submit, "stream": True}
+    params["max_tokens"] = max_tokens
+    params["messages"] = history_to_submit
+    params["stream"] = True
 
     # Add system prompt if provided. Always cache it.
     if system_prompt:
@@ -216,7 +233,7 @@ async def stream_response(
                 messages.append(data.get("message", {}))
                 messages[-1]["role"] = "assistant"
                 messages[-1]["content"] = []
-                tool_use_json = {} # TODO: handle this more gracefully
+                tool_use_json = {}  # TODO: handle this more gracefully
 
             elif kind == "message_delta":
                 delta = data.get("delta", {})

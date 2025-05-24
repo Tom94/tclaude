@@ -9,7 +9,7 @@ import sys
 
 import common
 from print import history_to_string
-from prompt import get_anthropic_response, TokenCounter
+from prompt import stream_response, TokenCounter
 
 
 async def main():
@@ -81,11 +81,11 @@ async def main():
 
             num_newlines_printed = 0
 
-            def reprint_current_response(message, tokens):
+            def reprint_current_response(messages, _):
                 nonlocal num_newlines_printed
                 # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
                 wrap_width = os.get_terminal_size().columns - 1
-                to_print = history_to_string([message], pretty=True, wrap_width=wrap_width)
+                to_print = history_to_string(messages, pretty=True, wrap_width=wrap_width)
 
                 # go up num_newlines_printed lines and erase them
                 print("\033[F" * num_newlines_printed + "\r", end="")
@@ -94,7 +94,7 @@ async def main():
                 print(to_print, end="", flush=True)
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, _, tokens = await get_anthropic_response(
+            _, tokens = await stream_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -146,7 +146,7 @@ async def main():
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            _, message, tokens = await get_anthropic_response(
+            messages, tokens = await stream_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history
@@ -158,7 +158,7 @@ async def main():
 
             total_tokens += tokens
 
-            session_name = history_to_string([message], pretty=False)
+            session_name = history_to_string(messages, pretty=False)
 
             print(f"Session name: {session_name}")
 

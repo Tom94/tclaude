@@ -21,6 +21,10 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
+VERTEX_API_KEY = os.getenv("VERTEX_API_KEY")
+VERTEX_API_URL = "https://api.vertex.ai/v1/messages"
+VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
+
 IS_ATTY = sys.stdout.isatty()
 
 
@@ -73,7 +77,53 @@ class TokenCounter:
         )
 
 
-async def get_anthropic_response(
+def get_endpoint_vertex(model: str):
+    if not VERTEX_API_KEY or not VERTEX_API_PROJECT:
+        raise ValueError("VERTEX_API_KEY and VERTEX_API_PROJECT environment variables are required")
+
+    # Prepare headers
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {VERTEX_API_KEY}",
+    }
+
+    url = f"https://aiplatform.googleapis.com/v1/projects/{VERTEX_API_PROJECT}/locations/global/publishers/google/models/{model}:generateContent"
+    return url, headers
+
+
+def get_endpoint_anthropic():
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+
+    # Prepare headers
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14",
+    }
+
+    url = ANTHROPIC_API_URL
+    return url, headers
+
+
+async def stream_events(url, headers, params):
+    """
+    Stream events from the Anthropic API using aiohttp.
+    """
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=params) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                if line.startswith(b"data: "):
+                    try:
+                        yield json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        print(f"Error decoding JSON: {line[6:]}")
+                        continue
+
+
+async def stream_response(
     user_input,
     model,
     history=[],
@@ -90,8 +140,9 @@ async def get_anthropic_response(
     Send user input to Anthropic API and get the response using aiohttp.
     Uses async streaming for incremental output.
     """
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+
+    url, headers = get_endpoint_anthropic()
+    # url, headers = get_endpoint_vertex("claude-sonnet-4@20250514")
 
     history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
 
@@ -115,8 +166,12 @@ async def get_anthropic_response(
         # Then set a new cache breakpoint for the last message
         history[-1]["content"][0]["cache_control"] = {"type": "ephemeral"}
 
+    # Make a copy is history in which messages don't contain anything but role and content. The online APIs aren't happy if they get more
+    # data than that.
+    history_to_submit = [{"role": m["role"], "content": m["content"]} for m in history]
+
     # Prepare request parameters
-    params = {"model": model, "max_tokens": max_tokens, "messages": history, "stream": True}
+    params = {"model": model, "max_tokens": max_tokens, "messages": history_to_submit, "stream": True}
 
     # Add system prompt if provided. Always cache it.
     if system_prompt:
@@ -148,124 +203,103 @@ async def get_anthropic_response(
         params["tools"] = tools
         params["tool_choice"] = {"type": "auto"}
 
-    # Prepare headers
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14",
-    }
+    tool_use_json = {}
+    messages = []
 
-    # Make the async streaming request
-    async with aiohttp.ClientSession() as session:
-        async with session.post(ANTHROPIC_API_URL, headers=headers, json=params) as response:
-            response.raise_for_status()
+    tokens = TokenCounter()
+    async for data in stream_events(url, headers, params):
+        kind = data.get("type")
 
-            # Track if we're currently in a thinking block
-            tool_use_json = StringIO()
+        if "message" in kind:
+            # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
+            if kind == "message_start":
+                messages.append(data.get("message", {}))
+                messages[-1]["role"] = "assistant"
+                messages[-1]["content"] = []
+                tool_use_json = {} # TODO: handle this more gracefully
 
-            message = {"role": "assistant", "content": []}
-            content = message["content"]
-            message_info = {}
+            elif kind == "message_delta":
+                delta = data.get("delta", {})
+                stop_reason = delta.get("stop_reason")
+                if stop_reason is not None:
+                    messages[-1]["stop_reason"] = stop_reason
 
-            tokens = TokenCounter()
+                usage = data.get("usage")
+                if usage:
+                    turn_tokens = TokenCounter(
+                        cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
+                        cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+                        input_tokens=usage.get("input_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
+                    )
 
-            # Parse SSE stream
-            while True:
-                try:
-                    line = await response.content.readline()
-                except aiohttp.ClientError as e:
-                    print(f"Error reading response: {e}")
-                    break
+                    tokens += turn_tokens
 
-                if not line:
-                    break
+            elif kind == "message_end":
+                continue
 
-                if not line.startswith(b"data: "):
-                    continue
+            continue
 
-                try:
-                    data = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
+        if not messages:
+            raise ValueError("Content block before message in the response")
 
-                kind = data.get("type")
+        content = messages[-1]["content"]
+        if kind == "content_block_start":
+            index = data.get("index", 0)
+            content_block = data.get("content_block", {})
 
-                # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
-                if kind == "message_start":
-                    message_info = data.get("message", {})
+            if index >= len(content):
+                content.extend([None] * (index - len(content) + 1))
 
-                elif kind == "message_delta":
-                    delta = data.get("delta", {})
-                    stop_reason = delta.get("stop_reason")
-                    if stop_reason is not None:
-                        message_info["stop_reason"] = stop_reason
+            content[index] = content_block
 
-                    usage = data.get("usage")
-                    if usage:
-                        turn_tokens = TokenCounter(
-                            cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
-                            cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
-                            input_tokens=usage.get("input_tokens", 0),
-                            output_tokens=usage.get("output_tokens", 0),
-                        )
+        elif kind == "content_block_delta":
+            index = data.get("index", 0)
 
-                        tokens += turn_tokens
+            if index >= len(content):
+                raise ValueError(f"Index {index} out of range for content list")
 
-                elif kind == "message_end":
-                    continue
+            delta = data.get("delta", {})
+            delta_type = delta.get("type")
 
-                elif kind == "content_block_start":
-                    index = data.get("index", 0)
-                    content_block = data.get("content_block", {})
+            if delta_type == "thinking_delta":
+                thinking_text = delta.get("thinking", "")
+                if "thinking" not in content[index]:
+                    content[index]["thinking"] = ""
+                content[index]["thinking"] += thinking_text
 
-                    if index >= len(content):
-                        content.extend([None] * (index - len(content) + 1))
+            elif delta_type == "text_delta":
+                text = delta.get("text", "")
+                if "text" not in content[index]:
+                    content[index]["text"] = ""
+                content[index]["text"] += text
 
-                    content[index] = content_block
+            elif delta_type == "citations_delta":
+                citation = delta.get("citation", {})
+                if "citations" not in content[index]:
+                    content[index]["citations"] = []
+                content[index]["citations"].append(citation)
 
-                elif kind == "content_block_delta":
-                    index = data.get("index", 0)
+            elif delta_type == "input_json_delta":
+                partial_json = delta.get("partial_json", "")
 
-                    if index >= len(content):
-                        raise ValueError(f"Index {index} out of range for content list")
+                if index not in tool_use_json:
+                    tool_use_json[index] = StringIO()
 
-                    delta = data.get("delta", {})
-                    delta_type = delta.get("type")
+                tuj = tool_use_json[index]
+                tuj.write(partial_json)
 
-                    if delta_type == "thinking_delta":
-                        thinking_text = delta.get("thinking", "")
-                        if "thinking" not in content[index]:
-                            content[index]["thinking"] = ""
-                        content[index]["thinking"] += thinking_text
+                if tuj.tell() > 0:
+                    try:
+                        content[index]["input"] = partial_loads(tuj.getvalue())
+                    except:
+                        pass
 
-                    elif delta_type == "text_delta":
-                        text = delta.get("text", "")
-                        if "text" not in content[index]:
-                            content[index]["text"] = ""
-                        content[index]["text"] += text
+        if on_response_update is not None:
+            on_response_update(messages, tokens)
 
-                    elif delta_type == "citations_delta":
-                        citation = delta.get("citation", {})
-                        if "citations" not in content[index]:
-                            content[index]["citations"] = []
-                        content[index]["citations"].append(citation)
-
-                    elif delta_type == "input_json_delta":
-                        partial_json = delta.get("partial_json", "")
-                        tool_use_json.write(partial_json)
-
-                        if tool_use_json.tell() > 0:
-                            try:
-                                content[index]["input"] = partial_loads(tool_use_json.getvalue())
-                            except:
-                                pass
-
-                if on_response_update is not None:
-                    on_response_update(message, tokens)
-
-    history.append(message)
-    return message_info, message, tokens
+    history.extend(messages)
+    return messages, tokens
 
 
 async def main():
@@ -307,7 +341,7 @@ async def main():
             return
 
     # The response is already printed during streaming, so we don't need to print it again
-    _, message, _ = await get_anthropic_response(
+    messages, _ = await stream_response(
         user_input,
         model=args.model,
         history=[],
@@ -319,7 +353,7 @@ async def main():
         thinking_budget=args.thinking_budget,
     )
 
-    print(history_to_string([message], pretty=False), end="", flush=True)
+    print(history_to_string(messages, pretty=False), end="", flush=True)
 
 
 if __name__ == "__main__":

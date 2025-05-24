@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import os
+
+import argparse
+
 
 PROMPT = " "
 
@@ -10,6 +14,38 @@ def prompt(prefix: str, pretty: bool) -> str:
         # result = f"\033[1;35m{result}\033[0m"
         result = f"\033[35m{result}\033[0m"
     return result
+
+
+def get_config_dir() -> str:
+    """
+    Get the path to the configuration file.
+    """
+    if "XDG_CONFIG_HOME" in os.environ:
+        config_dir = os.environ["XDG_CONFIG_HOME"]
+    else:
+        config_dir = os.path.join(os.path.expanduser("~"), ".config")
+
+    return os.path.join(config_dir, "tai")
+
+
+def parse_args():
+    default_role = os.path.join(get_config_dir(), "roles", "default.md")
+
+    parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
+    parser.add_argument("input", nargs="*", help="Input text to send to Claude")
+    parser.add_argument("-s", "--session", help="Path to session file for conversation history")
+    parser.add_argument("-r", "--role", default=default_role, help="Path to a markdown file containing a system prompt")
+    parser.add_argument("-m", "--model", default="claude-opus-4-0", help="Anthropic model to use")
+    parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response")
+    parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
+    parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
+    parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
+    parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+
+    args = parser.parse_args()
+    args.model = deduce_model_name(args.model)
+    return args
 
 
 def deduce_model_name(model: str) -> str:
@@ -62,16 +98,20 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def pretty_print_md(string):
+def pretty_print_md(string, wrap_width: int | None = None) -> str:
     """
     Turn string pretty by piping it through bat
     """
     try:
         import subprocess
 
+        command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", "--language=markdown"]
+        if wrap_width is not None:
+            command.extend(["--wrap=character", f"--terminal-width={wrap_width}"])
+
         # Use bat to pretty print the string
         process = subprocess.Popen(
-            ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", "--language=markdown"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

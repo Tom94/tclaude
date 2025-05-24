@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import argparse
-import asyncio
 import datetime
 import json
 import os
@@ -12,29 +10,15 @@ from print import history_to_string
 from prompt import stream_response, TokenCounter
 
 
-async def async_main():
+def main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
-    parser.add_argument("input", nargs="*", help="Input text to send to Claude")
-    parser.add_argument("-s", "--session", help="Path to session file for conversation history")
-    parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
-    parser.add_argument("-m", "--model", default="claude-opus-4-0", help="Anthropic model to use")
-    parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response")
-    parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
-    parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
-    parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
-    parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
-
-    args = parser.parse_args()
+    args = common.parse_args()
 
     if not sys.stdin.isatty():
         print(f"{sys.argv[0]} should only be run in interactive mode. Use prompt.py otherwise.")
         return
-
-    args.model = common.deduce_model_name(args.model)
 
     # Get user input from arguments or stdin
     user_input = ""
@@ -96,7 +80,7 @@ async def async_main():
                 print(to_print, end="", flush=True)
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, tokens = await stream_response(
+            _, tokens = stream_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -148,7 +132,7 @@ async def async_main():
         session_name = args.session
         if session_name is None:
             print("Auto-naming session file...")
-            messages, tokens = await stream_response(
+            messages, tokens = stream_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
                 model=args.model,
                 history=history.copy(),  # Using a copy ensures we don't modify the original history
@@ -179,10 +163,6 @@ async def async_main():
             total_tokens.print_cost(args.model)
 
         print(f"Total cost: ${total_tokens.total_cost(args.model):.2f}")
-
-
-def main():
-    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

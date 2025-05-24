@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
-import argparse
-import asyncio
 import json
 import os
 import sys
-import aiohttp
+import requests
 import subprocess
 
 from io import StringIO
@@ -125,23 +123,22 @@ def get_endpoint_anthropic(model: str) -> tuple:
     return url, headers, params
 
 
-async def stream_events(url, headers, params):
+def stream_events(url, headers, params):
     """
-    Stream events using aiohttp.
+    Stream events using requests.
     """
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=params) as response:
-            response.raise_for_status()
-            async for line in response.content:
-                if line.startswith(b"data: "):
-                    try:
-                        yield json.loads(line[6:])
-                    except json.JSONDecodeError:
-                        print(f"Error decoding JSON: {line[6:]}")
-                        continue
+    response = requests.post(url, headers=headers, json=params, stream=True)
+    response.raise_for_status()
+    for line in response.iter_lines():
+        if line.startswith(b"data: "):
+            try:
+                yield json.loads(line[6:])
+            except json.JSONDecodeError:
+                print(f"Error decoding JSON: {line[6:]}")
+                continue
 
 
-async def stream_response(
+def stream_response(
     user_input,
     model,
     history=[],
@@ -155,7 +152,7 @@ async def stream_response(
     on_response_update=None,
 ):
     """
-    Send user input to Anthropic API and get the response by async streaming for incremental output.
+    Send user input to Anthropic API and get the response by streaming for incremental output.
     """
 
     if "3-5" in model:
@@ -234,7 +231,7 @@ async def stream_response(
     messages = []
 
     tokens = TokenCounter()
-    async for data in stream_events(url, headers, params):
+    for data in stream_events(url, headers, params):
         kind = data.get("type")
 
         if "message" in kind:
@@ -329,24 +326,11 @@ async def stream_response(
     return messages, tokens
 
 
-async def async_main():
+def main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
-    parser.add_argument("input", nargs="*", help="Input text to send to Claude")
-    parser.add_argument("-s", "--session", help="Path to session file for conversation history")
-    parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
-    parser.add_argument("-m", "--model", default="claude-opus-4-0", help="Anthropic model to use")
-    parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response")
-    parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
-    parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
-    parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
-    parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
-
-    args = parser.parse_args()
-
-    args.model = common.deduce_model_name(args.model)
+    args = common.parse_args()
 
     # Get user input from arguments or stdin
     user_input = ""
@@ -370,7 +354,7 @@ async def async_main():
             return
 
     # The response is already printed during streaming, so we don't need to print it again
-    messages, _ = await stream_response(
+    messages, _ = stream_response(
         user_input,
         model=args.model,
         history=[],
@@ -383,10 +367,6 @@ async def async_main():
     )
 
     print(history_to_string(messages, pretty=False), end="", flush=True)
-
-
-def main():
-    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

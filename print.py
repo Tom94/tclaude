@@ -106,27 +106,10 @@ def history_to_string(history, pretty, wrap_width: int | None = None):
                 io.write("\n")
 
     result = io.getvalue().rstrip()
-    if wrap_width is not None:
-        result = word_wrap(result, wrap_width)
-
     if pretty:
-        result = common.pretty_print_md(result)
+        result = common.pretty_print_md(result, wrap_width=wrap_width)
 
     return result
-
-
-def word_wrap(text: str, width: int) -> str:
-    """
-    Wraps the text to the specified width.
-    """
-    wrapped_text = StringIO()
-    for line in text.splitlines():
-        if len(line) > width:
-            wrapped_text.write("\n".join([line[i : i + width] for i in range(0, len(line), width)]))
-        else:
-            wrapped_text.write(line)
-        wrapped_text.write("\n")
-    return wrapped_text.getvalue().rstrip()
 
 
 def main():

@@ -5,6 +5,8 @@ import json
 import os
 import sys
 
+from io import StringIO
+
 import common
 from print import history_to_string
 from prompt import stream_response, TokenCounter
@@ -65,22 +67,35 @@ def main():
             else:
                 print(f"{prompt}{user_input}")
 
+            # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
             num_newlines_printed = 0
 
-            def reprint_current_response(messages, _):
+            term_width = os.get_terminal_size().columns
+            term_height = os.get_terminal_size().lines
+
+            def reprint_current_response(messages, _, max_height: int | None = term_height):
                 nonlocal num_newlines_printed
-                # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-                wrap_width = os.get_terminal_size().columns - 1
-                to_print = history_to_string(messages, pretty=True, wrap_width=wrap_width)
 
-                # go up num_newlines_printed lines and erase them
-                print("\033[F" * num_newlines_printed + "\r", end="")
-                num_newlines_printed = to_print.count("\n")
+                to_print = StringIO()
+                to_print.write("\033[F" * num_newlines_printed)
+                to_print.write("\r")
 
-                print(to_print, end="", flush=True)
+                # Print the last term_height - 1 lines of the history to avoid terminal problems
+                current_message = history_to_string(messages, pretty=True, wrap_width=term_width - 1)
+                lines = current_message.split("\n")
+
+                if max_height is not None:
+                    if len(lines) >= max_height:
+                        lines = lines[-(max_height - 1) :]
+
+                for line in lines:
+                    to_print.write(f"\033[K{line}\n")
+
+                print(to_print.getvalue().rstrip(), end="", flush=True)
+                num_newlines_printed = len(lines) - 1
 
             # The response is already printed during streaming, so we don't need to print it again
-            _, tokens = stream_response(
+            messages, tokens = stream_response(
                 user_input,
                 model=args.model,
                 history=history,
@@ -93,6 +108,9 @@ def main():
                 write_cache=write_cache,
                 on_response_update=reprint_current_response,
             )
+
+            # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
+            reprint_current_response(messages, tokens, None)
 
             total_tokens += tokens
             running_cost = total_tokens.total_cost(args.model)

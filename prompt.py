@@ -11,6 +11,7 @@ import subprocess
 from io import StringIO
 from partial_json_parser import loads as partial_loads
 
+import common
 from print import history_to_string
 
 # Web search tool configuration
@@ -50,6 +51,8 @@ class TokenCounter:
             cost_factor = 5.0
         elif "haiku" in model:
             cost_factor = 1.0 / 3.75
+            if "3-haiku" in model:
+                cost_factor *= 0.3
 
         # See https://docs.anthropic.com/en/docs/about-claude/models/overview#model-pricing
         price_per_minput_cache_creation = 3.75 * cost_factor
@@ -124,7 +127,7 @@ def get_endpoint_anthropic(model: str) -> tuple:
 
 async def stream_events(url, headers, params):
     """
-    Stream events from the Anthropic API using aiohttp.
+    Stream events using aiohttp.
     """
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=params) as response:
@@ -152,9 +155,15 @@ async def stream_response(
     on_response_update=None,
 ):
     """
-    Send user input to Anthropic API and get the response using aiohttp.
-    Uses async streaming for incremental output.
+    Send user input to Anthropic API and get the response by async streaming for incremental output.
     """
+
+    if "3-5" in model:
+        # Disable features not supported by the 3.5 models
+        enable_web_search = False
+        enable_code_exec = False
+        enable_thinking = False
+        max_tokens = min(max_tokens, 8192)
 
     url, headers, params = get_endpoint_anthropic(model)
     # url, headers, params = get_endpoint_vertex("claude-sonnet-4@20250514")
@@ -201,6 +210,7 @@ async def stream_response(
 
     # Add web search tool if enabled
     tools = []
+
     if enable_web_search:
         web_search_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": MAX_SEARCH_USES}
 
@@ -335,6 +345,8 @@ async def main():
     parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
 
     args = parser.parse_args()
+
+    args.model = common.deduce_model_name(args.model)
 
     # Get user input from arguments or stdin
     user_input = ""

@@ -12,6 +12,24 @@ def prompt(prefix: str, pretty: bool) -> str:
     return result
 
 
+def deduce_model_name(model: str) -> str:
+    if "opus" in model:
+        if "3" in model:
+            return "claude-3-opus-latest"
+        return "claude-opus-4-0"
+    elif "sonnet" in model:
+        if "3.5" in model:
+            return "claude-3-5-sonnet-latest"
+        elif "3.7" in model:
+            return "claude-3-7-sonnet-latest"
+        elif "3" in model:
+            return "claude-3-sonnet-latest"
+        return "claude-sonnet-4-0"
+    elif "haiku" in model:
+        return "claude-3-5-haiku-latest"
+    return model
+
+
 def friendly_model_name(model: str) -> str:
     """
     Convert a model name to a more user-friendly format.

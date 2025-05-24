@@ -34,6 +34,8 @@ async def main():
         print(f"{sys.argv[0]} should only be run in interactive mode. Use prompt.py otherwise.")
         return
 
+    args.model = common.deduce_model_name(args.model)
+
     # Get user input from arguments or stdin
     user_input = ""
     if args.input:

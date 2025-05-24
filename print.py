@@ -102,7 +102,7 @@ def history_to_string(history, pretty, wrap_width: int | None = None):
                 for k, v in sorted(references.items(), key=lambda x: x[1]["id"]):
                     io.write(f"{to_superscript(v['id'])} {k} - {v['title']}\n")
                     for val in sorted(v["cited_texts"]):
-                        io.write(f"   \"{val}\"\n")
+                        io.write(f'   "{val}"\n')
                 io.write("\n")
 
     result = io.getvalue().rstrip()

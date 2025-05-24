@@ -71,7 +71,7 @@ def pretty_print_md(string):
 
         # Use bat to pretty print the string
         process = subprocess.Popen(
-            ["bat", "--color=always", "--paging=never", "--style=plain", "--language=markdown"],
+            ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", "--language=markdown"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

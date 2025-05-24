@@ -12,7 +12,7 @@ from print import history_to_string
 from prompt import stream_response, TokenCounter
 
 
-async def main():
+async def async_main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -181,5 +181,9 @@ async def main():
         print(f"Total cost: ${total_tokens.total_cost(args.model):.2f}")
 
 
+def main():
+    asyncio.run(async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

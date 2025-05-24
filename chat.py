@@ -118,7 +118,7 @@ def main():
                 tokens.print_cost(args.model)
                 if write_cache:
                     print("Next prompt will be cached.")
-                print()
+                    print()
 
             received_response = True
             user_input = ""
@@ -127,10 +127,12 @@ def main():
     except EOFError:
         pass
 
+    print()
+
     if received_response:
         # Save updated history if session file is specified
-        session_name = args.session
-        if session_name is None:
+        session_path = args.session
+        if session_path is None:
             print("Auto-naming session file...")
             messages, tokens = stream_response(
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
@@ -153,9 +155,10 @@ def main():
 
             date = datetime.datetime.now().strftime("%Y-%m-%d")
             session_name = f"{date}-{session_name}.json"
+            session_path = os.path.join(args.sessions_dir, session_name)
 
-        print(f"Saving session as {session_name}...")
-        with open(session_name, "w") as f:
+        print(f"Saving session to {session_path}")
+        with open(session_path, "w") as f:
             json.dump(history, f, indent=2)
 
         if args.verbose:

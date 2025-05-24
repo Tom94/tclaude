@@ -28,12 +28,22 @@ def get_config_dir() -> str:
     return os.path.join(config_dir, "tai")
 
 
+def default_sessions_dir() -> str:
+    """
+    Get the default session directory.
+    """
+    if "TAI_SESSIONS_DIR" in os.environ:
+        return os.environ["TAI_SESSIONS_DIR"]
+    return "."
+
+
 def parse_args():
     default_role = os.path.join(get_config_dir(), "roles", "default.md")
 
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     parser.add_argument("input", nargs="*", help="Input text to send to Claude")
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
+    parser.add_argument("--sessions-dir", default=default_sessions_dir(), help="Path to directory for session files")
     parser.add_argument("-r", "--role", default=default_role, help="Path to a markdown file containing a system prompt")
     parser.add_argument("-m", "--model", default="claude-opus-4-0", help="Anthropic model to use")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response")

@@ -105,11 +105,11 @@ def history_to_string(history, pretty, wrap_width: int | None = None):
                         io.write(f'   "{val}"\n')
                 io.write("\n")
 
-    result = io.getvalue().rstrip()
+    result = io.getvalue()
     if pretty:
         result = common.pretty_print_md(result, wrap_width=wrap_width)
 
-    return result
+    return result.rstrip()
 
 
 def main():

@@ -58,7 +58,10 @@ def main():
 
     try:
         while True:
-            prompt_prefix = f"${running_cost:.02f} {common.friendly_model_name(args.model)} "
+            prompt_prefix = f"{common.friendly_model_name(args.model)} "
+            if running_cost > 0.1:
+                prompt_prefix = f"${running_cost:.02f} {prompt_prefix}"
+
             prompt = common.prompt(prompt_prefix, True)
             if not user_input:
                 user_input = input(prompt).strip()

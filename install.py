@@ -52,7 +52,9 @@ def main():
 
     args = parser.parse_args()
 
-    builder = PyInstallerBuilder("chat.py", "tai")
+    bin_name = "tai"
+
+    builder = PyInstallerBuilder("chat.py", bin_name)
     builder.clean()
     success = builder.build(icon=args.icon)
 
@@ -61,8 +63,9 @@ def main():
         install_dir = os.path.expanduser(args.prefix)
         if not os.path.exists(install_dir):
             os.makedirs(install_dir)
-        shutil.move(f"dist/tai", install_dir)
-        print(f"Moved executable to: {install_dir}/tai")
+        bin_path = os.path.join(install_dir, bin_name)
+        shutil.move(os.path.join("dist", bin_name), bin_path)
+        print(f"Moved executable to: {bin_path}")
 
         shutil.rmtree("dist")
         os.remove("tai.spec")

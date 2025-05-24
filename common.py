@@ -5,15 +5,11 @@ import os
 import argparse
 
 
-PROMPT = " "
+CHEVRON = ""
 
 
-def prompt(prefix: str, pretty: bool) -> str:
-    result = f"{prefix}{PROMPT}"
-    if pretty:
-        # result = f"\033[1;35m{result}\033[0m"
-        result = f"\033[35m{result}\033[0m"
-    return result
+def ansi(cmd: str) -> str:
+    return f"\033[{cmd}"
 
 
 def get_config_dir() -> str:

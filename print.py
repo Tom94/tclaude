@@ -25,7 +25,13 @@ def history_to_string(history, pretty, wrap_width: int | None = None):
                 if content_block.type == "text":
                     io.write(f"{content_block.text}\n")
         elif message["role"] == "user":
-            io.write(f"{common.prompt('', pretty)}{message['content'][0]['text']}\n")
+            prompt = f"{common.CHEVRON} "
+            input = message["content"][0]["text"]
+            if pretty:
+                prompt = f"{common.ansi('95m')}{prompt}"
+                input = f"{common.ansi('97m')}{input}{common.ansi('0m')}"
+
+            io.write(f"{prompt}{input}\n")
         elif message["role"] == "assistant":
             references = {}
 

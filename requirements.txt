@@ -1,3 +1,4 @@
 partial-json-parser
+prompt_toolkit
 requests
 

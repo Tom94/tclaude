@@ -11,6 +11,10 @@ import common
 from print import history_to_string
 from prompt import stream_response, TokenCounter
 
+from prompt_toolkit import PromptSession, print_formatted_text, HTML
+from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
+from prompt_toolkit.styles import Style
+
 
 def main():
     """
@@ -37,13 +41,21 @@ def main():
             print(f"Error reading system prompt file: {e}")
             return
 
+    prompt_session = PromptSession()
+
     # Initialize or load messages history
     history = []
     if args.session and os.path.exists(args.session):
         try:
             with open(args.session, "r") as f:
                 history = json.load(f)
-                print(history_to_string(history, pretty=True), "\n")
+                for message in history:
+                    if message.get("role") == "user":
+                        text = message.get("content", [{}])[0].get("text", "")
+                        if text:
+                            prompt_session.history.append_string(text)
+
+                print(history_to_string(history, pretty=True))
         except json.JSONDecodeError:
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
@@ -58,17 +70,28 @@ def main():
 
     try:
         while True:
-            prompt_prefix = f"{common.friendly_model_name(args.model)} "
-            if running_cost > 0.1:
-                prompt_prefix = f"${running_cost:.02f} {prompt_prefix}"
+            style = Style.from_dict(
+                {
+                    "": "fg:#ffffff",
+                    "white": "fg:#ffffff",
+                    "violet": "fg:#efb5f7",
+                }
+            )
 
-            prompt = common.prompt(prompt_prefix, True)
             if not user_input:
-                user_input = input(prompt).strip()
+                rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
+                user_input = prompt_session.prompt(
+                    HTML(f"<violet>{common.CHEVRON}</violet> "),
+                    rprompt=HTML(f"<violet>{rprompt}</violet>"),
+                    vi_mode=True,
+                    cursor=ModalCursorShapeConfig(),
+                    style=style,
+                ).strip()
                 if not user_input:
                     continue
             else:
-                print(f"{prompt}{user_input}")
+                prompt_session.history.append_string(user_input)
+                print_formatted_text(HTML(f"<violet>{common.CHEVRON}</violet> {user_input}"), style=style)
 
             # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
             num_newlines_printed = 0

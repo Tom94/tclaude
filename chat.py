@@ -38,6 +38,38 @@ def create_prompt_key_bindings():
     return bindings
 
 
+def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
+    user_input = ""
+    while not user_input:
+        user_input = prompt_session.prompt(
+            ANSI(common.prompt_style(lprompt)),
+            rprompt=ANSI(common.prompt_style(rprompt)),
+            vi_mode=True,
+            cursor=ModalCursorShapeConfig(),
+            multiline=True,
+            placeholder=HTML(f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"),
+            key_bindings=key_bindings,
+        ).strip()
+
+    return user_input
+
+
+def should_cache(tokens: TokenCounter, model: str) -> bool:
+    """
+    We heuristically set a new cache breakpoint when our next prompt (if short ~0 tokens) causes the cost of input to be larger
+    than that of cache reads.
+    TODO: If we just finished a web search, apparently something messy happens to the cache... should investigate
+    """
+    tokens_if_short_follow_up = TokenCounter(
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=tokens.cache_read + tokens.cache_creation,
+        input_tokens=tokens.input + tokens.output,
+        output_tokens=0,
+    )
+    _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(model)
+    return cache_read_cost < input_cost
+
+
 def main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
@@ -83,13 +115,12 @@ def main():
             print(f"Error: Could not parse session file {args.session}. Starting new session.")
             return
 
-    total_tokens = TokenCounter()
+    initial_history_length = len(history)
 
-    received_response = False
+    total_tokens = TokenCounter()
 
     # Initially, don't cache anything. The system prompt is always cached.
     write_cache = False
-    running_cost = 0.0
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
     num_newlines_printed = 0
@@ -125,20 +156,9 @@ def main():
 
             if is_user_turn:
                 if not user_input:
-                    rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
-                    user_input = prompt_session.prompt(
-                        ANSI(common.prompt_style(f"{common.CHEVRON} ")),
-                        rprompt=ANSI(common.prompt_style(rprompt)),
-                        vi_mode=True,
-                        cursor=ModalCursorShapeConfig(),
-                        multiline=True,
-                        placeholder=HTML(
-                            f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"
-                        ),
-                        key_bindings=prompt_key_bindings,
-                    ).strip()
-                    if not user_input:
-                        continue
+                    lprompt = f"{common.CHEVRON} "
+                    rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
+                    user_input = user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 else:
                     prompt_session.history.append_string(user_input)
                     print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
@@ -148,6 +168,12 @@ def main():
             else:
                 # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
                 pass
+
+            def on_response_interrupt():
+                nonlocal is_user_turn
+                if is_user_turn:
+                    history.pop()
+                is_user_turn = True
 
             try:
                 # The response is already printed during streaming, so we don't need to print it again
@@ -173,48 +199,29 @@ def main():
                 else:
                     is_user_turn = True
             except KeyboardInterrupt:
-                if is_user_turn:
-                    history.pop()
                 print("\n\nResponse interrupted by user.\n")
-                is_user_turn = True
+                on_response_interrupt()
                 continue
             except Exception as e:
-                if is_user_turn:
-                    history.pop()
                 print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
-                is_user_turn = True
+                on_response_interrupt()
                 continue
 
             history.extend(messages)
+            total_tokens += tokens
 
             # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
             reprint_current_response(messages, tokens, limit_to_terminal_height=False)
 
-            total_tokens += tokens
-            running_cost = total_tokens.total_cost(args.model)
+            # Automatically determine whether we should put a cache breakpoint into the next prompt
+            write_cache = should_cache(tokens, args.model)
 
-            # We heuristically set a new cache breakpoint when our next prompt (if short ~0 tokens) causes the cost of input to be larger
-            # than that of cache reads.
-            # TODO: If we just finished a web search, apparently something messy happens to the cache... should investigate
-            tokens_if_short_follow_up = TokenCounter(
-                cache_creation_input_tokens=0,
-                cache_read_input_tokens=tokens.cache_read + tokens.cache_creation,
-                input_tokens=tokens.input + tokens.output,
-                output_tokens=0,
-            )
-            _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(args.model)
-            write_cache = cache_read_cost < input_cost
-
-            # An empty line between each prompt
             print("\n")
-
             if args.verbose:
                 tokens.print_tokens()
                 tokens.print_cost(args.model)
                 if write_cache:
                     print("Next prompt will be cached.\n")
-
-            received_response = True
     except KeyboardInterrupt:
         pass
     except EOFError:
@@ -222,8 +229,8 @@ def main():
 
     print()
 
-    if received_response:
-        # Save updated history if session file is specified
+    # If we submitted a user prompt and received a response (at least 2 messages), save the session
+    if len(history) - initial_history_length >= 2:
         session_path = args.session
         if session_path is None:
             print("Auto-naming session file...")
@@ -269,6 +276,7 @@ def main():
         if args.verbose:
             total_tokens.print_tokens()
             total_tokens.print_cost(args.model)
+
 
 if __name__ == "__main__":
     main()

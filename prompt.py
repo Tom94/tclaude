@@ -416,10 +416,16 @@ def stream_response(
             delta_type = delta.get("type")
 
             if delta_type == "thinking_delta":
-                thinking_text = delta.get("thinking", "")
+                thinking_delta = delta.get("thinking", "")
                 if "thinking" not in content[index]:
                     content[index]["thinking"] = ""
-                content[index]["thinking"] += thinking_text
+                content[index]["thinking"] += thinking_delta
+
+            if delta_type == "signature_delta":
+                signature_delta = delta.get("signature", "")
+                if "thinking" not in content[index]:
+                    content[index]["signature"] = ""
+                content[index]["signature"] += signature_delta
 
             elif delta_type == "text_delta":
                 text = delta.get("text", "")

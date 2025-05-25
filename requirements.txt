@@ -1,3 +1,5 @@
+beautifulsoup4
+html2text
 partial-json-parser
 prompt_toolkit
 requests

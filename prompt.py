@@ -5,6 +5,8 @@ import os
 import sys
 import requests
 import subprocess
+import inspect
+import importlib
 from typing import Callable, Iterator
 
 from io import StringIO
@@ -29,13 +31,120 @@ VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
 IS_ATTY = sys.stdout.isatty()
 
 
+def get_available_tools() -> dict:
+    """
+    Dynamically import tools.py and extract all callable functions.
+    Returns a dictionary mapping function names to their callable objects.
+    """
+    try:
+        tools_module = importlib.import_module("tools")
+        available_tools = {}
+
+        for name, obj in inspect.getmembers(tools_module):
+            if inspect.isfunction(obj) and not name.startswith("_"):
+                available_tools[name] = obj
+
+        return available_tools
+    except ImportError:
+        return {}
+
+
+def get_tool_definitions() -> list[dict]:
+    """
+    Generate tool definitions for Claude based on functions in tools.py.
+    """
+    available_tools = get_available_tools()
+    tool_definitions = []
+
+    for name, func in available_tools.items():
+        # Get function signature and docstring
+        sig = inspect.signature(func)
+        doc = inspect.getdoc(func) or ""
+
+        # Parse parameters
+        properties = {}
+        required = []
+
+        for param_name, param in sig.parameters.items():
+            param_type = "string"  # Default type
+            param_desc = f"Parameter {param_name}"
+
+            # Try to extract type from annotation
+            if param.annotation != inspect.Parameter.empty:
+                if param.annotation == str:
+                    param_type = "string"
+                elif param.annotation == int:
+                    param_type = "integer"
+                elif param.annotation == float:
+                    param_type = "number"
+                elif param.annotation == bool:
+                    param_type = "boolean"
+                elif hasattr(param.annotation, "__origin__"):
+                    # Handle generic types like List[str]
+                    if param.annotation.__origin__ == list:
+                        param_type = "array"
+                    elif param.annotation.__origin__ == dict:
+                        param_type = "object"
+
+            properties[param_name] = {"type": param_type, "description": param_desc}
+
+            # Add to required if no default value
+            if param.default == inspect.Parameter.empty:
+                required.append(param_name)
+
+        tool_def = {"name": name, "description": doc, "input_schema": {"type": "object", "properties": properties, "required": required}}
+
+        tool_definitions.append(tool_def)
+
+    return tool_definitions
+
+
 def use_tools(messages: list[dict]) -> dict:
     """
     Use the tools specified in the messages to perform actions.
     This function is called when the model indicates that it wants to use a tool.
     """
-    # TODO: implement
-    return {}
+    available_tools = get_available_tools()
+    tool_results = []
+
+    # Find the last assistant message with tool use
+    last_message = messages[-1] if messages else None
+    if not last_message or last_message.get("role") != "assistant":
+        return {"role": "user", "content": tool_results}
+
+    # Process each content block that contains tool use
+    for content_block in last_message.get("content", []):
+        if content_block.get("type") == "tool_use":
+            tool_name = content_block.get("name")
+            tool_input = content_block.get("input", {})
+            tool_use_id = content_block.get("id")
+
+            if tool_name in available_tools:
+                try:
+                    # Call the tool function with the provided input
+                    result = available_tools[tool_name](**tool_input)
+
+                    # Convert result to string if it's not already
+                    if not isinstance(result, str):
+                        result = str(result)
+
+                    tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": result})
+
+                except Exception as e:
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": f"Error executing tool {tool_name}: {str(e)}",
+                            "is_error": True,
+                        }
+                    )
+            else:
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True}
+                )
+
+    return {"role": "user", "content": tool_results}
 
 
 class TokenCounter:
@@ -238,6 +347,10 @@ def stream_response(
     if enable_code_exec:
         code_exec_tool = {"type": "code_execution_20250522", "name": "code_execution"}
         tools.append(code_exec_tool)
+
+    # Add dynamically loaded tools from tools.py
+    custom_tools = get_tool_definitions()
+    tools.extend(custom_tools)
 
     if tools:
         params["tools"] = tools

@@ -12,12 +12,18 @@ def ansi(cmd: str) -> str:
     return f"\033[{cmd}"
 
 
+def wrap_style(msg: str, cmd: str, pretty=True) -> str:
+    if pretty:
+        return f"{ansi(cmd)}{msg}{ansi('0m')}"
+    return msg
+
+
 def prompt_style(msg: str) -> str:
-    return f"{ansi('0;35m')}{msg}{ansi('0m')}"
+    return wrap_style(msg, "0;35m")  # magenta
 
 
 def input_style(msg: str) -> str:
-    return f"{ansi('1m')}{msg}{ansi('0m')}"
+    return wrap_style(msg, "1m")  # bold
 
 
 def get_config_dir() -> str:
@@ -112,14 +118,70 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def pretty_print_md(string: str, wrap_width: int | None = None) -> str:
+def word_wrap(text: str, wrap_width: int | None) -> str:
+    if not text or wrap_width is None or wrap_width <= 0:
+        return text
+
+    lines = []
+
+    for line in text.split("\n"):
+        # Preserve empty lines
+        if not line.strip():
+            lines.append(line)
+            continue
+
+        # Detect indentation of the original line
+        stripped_line = line.lstrip()
+        indent = line[: len(line) - len(stripped_line)]
+
+        # If the line fits within wrap_width, keep it as is
+        if len(line) <= wrap_width:
+            lines.append(line)
+            continue
+
+        # Wrap the line while preserving indentation
+        current_line = []
+        words = stripped_line.split()
+
+        for word in words:
+            # If a single word is longer than the available width, split it
+            available_width = wrap_width - len(indent)
+            if len(word) > available_width and available_width > 0:
+                # First, add any current line content
+                if current_line:
+                    lines.append(indent + " ".join(current_line))
+                    current_line = []
+
+                # Split the long word into chunks
+                while len(word) > available_width:
+                    lines.append(indent + word[:available_width])
+                    word = word[available_width:]
+
+                # Add the remaining part of the word
+                if word:
+                    current_line = [word]
+            else:
+                test_line = " ".join(current_line + [word])
+                if len(indent + test_line) > wrap_width and current_line:
+                    lines.append(indent + " ".join(current_line))
+                    current_line = [word]
+                else:
+                    current_line.append(word)
+
+        if current_line:
+            lines.append(indent + " ".join(current_line))
+
+    return "\n".join(lines)
+
+
+def bat_syntax_highlight(string: str, language: str, wrap_width: int | None = None) -> str:
     """
     Turn string pretty by piping it through bat
     """
     try:
         import subprocess
 
-        command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", "--language=markdown"]
+        command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
         if wrap_width is not None:
             command.extend(["--wrap=character", f"--terminal-width={wrap_width}"])
 

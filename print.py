@@ -230,6 +230,9 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
             i -= 1  # Adjust for the outer loop increment
         elif block_type == "tool_use" or block_type == "server_tool_use":
             write_tool_use(content_block, tool_results, io, pretty, wrap_width)
+        elif block_type == "redacted_thinking":
+            encrypted_thinking = content_block.get("data", "")
+            write_call_block(f"Redacted thinking", f"{len(encrypted_thinking)} bytes of encrypted thinking data.", io, pretty, wrap_width)
         else:
             write_call_block(f"assistant `{block_type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
 

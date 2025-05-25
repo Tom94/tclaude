@@ -226,7 +226,7 @@ def main():
     if len(history) - initial_history_length >= 2:
         session_path = args.session
         if session_path is None:
-            print("Auto-naming session file...")
+            print("Auto-naming session... ", end="", flush=True)
             autoname_prompt = (
                 "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
             )
@@ -244,11 +244,13 @@ def main():
 
                 total_tokens += tokens
                 session_name = history_to_string(messages, pretty=False)
+                print("\r", end="", flush=True)
             except KeyboardInterrupt:
-                print("\n\nSession naming interrupted by user. Falling back to time stamp.")
+                print("interrupted by user.")
+                print("Falling back to time stamp.")
                 session_name = datetime.datetime.now().strftime("%H-%M-%S")
             except Exception as e:
-                print(f"Error auto-naming session: {e}")
+                print(f"error auto-naming session: {e}")
                 print(f"Falling back to time stamp.")
                 session_name = datetime.datetime.now().strftime("%H-%M-%S")
             finally:
@@ -261,9 +263,10 @@ def main():
             session_name = f"{date}-{session_name}.json"
             session_path = os.path.join(args.sessions_dir, session_name)
 
-        print(f"✓ Saving session to {session_path}")
         with open(session_path, "w") as f:
             json.dump(history, f, indent=2)
+
+        print(f"✓ Saved session to {session_path}")
 
         if args.verbose:
             total_tokens.print_tokens()

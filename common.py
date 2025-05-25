@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     parser.add_argument("--sessions-dir", default=default_sessions_dir(), help="Path to directory for session files")
     parser.add_argument("-r", "--role", default=default_role, help="Path to a markdown file containing a system prompt")
-    parser.add_argument("-m", "--model", default="claude-opus-4-0", help="Anthropic model to use")
+    parser.add_argument("-m", "--model", default="claude-sonnet-4-0", help="Anthropic model to use")
     parser.add_argument("--max-tokens", type=int, default=2**14, help="Maximum number of tokens in the response")
     parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
     parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")

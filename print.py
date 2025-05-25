@@ -28,8 +28,8 @@ def history_to_string(history: list[dict], pretty: bool, wrap_width: int | None 
             prompt = f"{common.CHEVRON} "
             input = message["content"][0]["text"]
             if pretty:
-                prompt = f"{common.ansi('95m')}{prompt}"
-                input = f"{common.ansi('97m')}{input}{common.ansi('0m')}"
+                prompt = common.prompt_style(prompt)
+                input = common.input_style(input)
 
             io.write(f"{prompt}{input}\n")
         elif message["role"] == "assistant":

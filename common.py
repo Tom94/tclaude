@@ -12,6 +12,14 @@ def ansi(cmd: str) -> str:
     return f"\033[{cmd}"
 
 
+def prompt_style(msg: str) -> str:
+    return f"{ansi('0;35m')}{msg}{ansi('0m')}"
+
+
+def input_style(msg: str) -> str:
+    return f"{ansi('1m')}{msg}{ansi('0m')}"
+
+
 def get_config_dir() -> str:
     """
     Get the path to the configuration file.

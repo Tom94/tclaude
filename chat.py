@@ -11,9 +11,9 @@ import common
 from print import history_to_string
 from prompt import stream_response, TokenCounter
 
-from prompt_toolkit import PromptSession, print_formatted_text, HTML
+from prompt_toolkit import PromptSession, print_formatted_text, ANSI, HTML
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
-from prompt_toolkit.styles import Style
+from prompt_toolkit.key_binding import KeyBindings
 
 
 def main():
@@ -70,28 +70,34 @@ def main():
 
     try:
         while True:
-            style = Style.from_dict(
-                {
-                    "": "fg:#ffffff",
-                    "white": "fg:#ffffff",
-                    "violet": "fg:#efb5f7",
-                }
-            )
-
             if not user_input:
+                bindings = KeyBindings()
+
+                @bindings.add("enter")
+                def _(event):
+                    event.app.current_buffer.validate_and_handle()
+
+                @bindings.add("\\", "enter")
+                def _(event):
+                    event.app.current_buffer.newline()
+
                 rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
                 user_input = prompt_session.prompt(
-                    HTML(f"<violet>{common.CHEVRON}</violet> "),
-                    rprompt=HTML(f"<violet>{rprompt}</violet>"),
+                    ANSI(common.prompt_style(f"{common.CHEVRON} ")),
+                    rprompt=ANSI(common.prompt_style(rprompt)),
                     vi_mode=True,
                     cursor=ModalCursorShapeConfig(),
-                    style=style,
+                    multiline=True,
+                    placeholder=HTML(
+                        f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"
+                    ),
+                    key_bindings=bindings,
                 ).strip()
                 if not user_input:
                     continue
             else:
                 prompt_session.history.append_string(user_input)
-                print_formatted_text(HTML(f"<violet>{common.CHEVRON}</violet> {user_input}"), style=style)
+                print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
 
             # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
             num_newlines_printed = 0

@@ -177,7 +177,7 @@ def main():
 
             try:
                 # The response is already printed during streaming, so we don't need to print it again
-                messages, tokens = stream_response(
+                messages, tokens, call_again = stream_response(
                     model=args.model,
                     history=history,
                     max_tokens=args.max_tokens,
@@ -190,14 +190,7 @@ def main():
                     on_response_update=reprint_current_response,
                 )
 
-                stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
-                if stop_reason == "pause_turn":
-                    is_user_turn = False
-                elif stop_reason == "tool_use":
-                    is_user_turn = False
-                    print("Warning: tool use detected, but not implemented yet.")
-                else:
-                    is_user_turn = True
+                is_user_turn = not call_again
             except KeyboardInterrupt:
                 print("\n\nResponse interrupted by user.\n")
                 on_response_interrupt()
@@ -240,7 +233,7 @@ def main():
 
             history.append({"role": "user", "content": [{"type": "text", "text": autoname_prompt}]})
             try:
-                messages, tokens = stream_response(
+                messages, tokens, _ = stream_response(
                     model=args.model,
                     history=history,
                     max_tokens=30,
@@ -250,7 +243,6 @@ def main():
                 )
 
                 total_tokens += tokens
-
                 session_name = history_to_string(messages, pretty=False)
             except KeyboardInterrupt:
                 print("\n\nSession naming interrupted by user. Falling back to time stamp.")
@@ -269,7 +261,7 @@ def main():
             session_name = f"{date}-{session_name}.json"
             session_path = os.path.join(args.sessions_dir, session_name)
 
-        print(f"Saving session to {session_path}")
+        print(f"✓ Saving session to {session_path}")
         with open(session_path, "w") as f:
             json.dump(history, f, indent=2)
 

@@ -29,6 +29,15 @@ VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
 IS_ATTY = sys.stdout.isatty()
 
 
+def use_tools(messages: list[dict]) -> dict:
+    """
+    Use the tools specified in the messages to perform actions.
+    This function is called when the model indicates that it wants to use a tool.
+    """
+    # TODO: implement
+    return {}
+
+
 class TokenCounter:
     def __init__(
         self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0
@@ -152,7 +161,7 @@ def stream_response(
     thinking_budget: int | None = None,
     write_cache: bool = False,
     on_response_update: Callable[[list[dict], TokenCounter], None] | None = None,
-) -> tuple[list[dict], TokenCounter]:
+) -> tuple[list[dict], TokenCounter, bool]:
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.
     """
@@ -329,7 +338,16 @@ def stream_response(
         if on_response_update is not None:
             on_response_update(messages, tokens)
 
-    return messages, tokens
+    stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
+    if stop_reason == "pause_turn":
+        call_again = True
+    elif stop_reason == "tool_use":
+        call_again = True
+        messages.append(use_tools(messages))
+    else:
+        call_again = False
+
+    return messages, tokens, call_again
 
 
 def main():
@@ -362,8 +380,9 @@ def main():
     # The response is already printed during streaming, so we don't need to print it again
     history = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
 
-    while True:
-        messages, _ = stream_response(
+    call_again = True
+    while call_again:
+        messages, _, call_again = stream_response(
             model=args.model,
             history=history,
             max_tokens=args.max_tokens,
@@ -375,16 +394,7 @@ def main():
         )
         history.extend(messages)
 
-        stop_reason = history[-1].get("stop_reason")
-        if stop_reason == "pause_turn":
-            continue
-        elif stop_reason == "tool_use":
-            print("Warning: tool use detected, but not implemented yet.")
-            break
-        else:
-            break
-
-    print(history_to_string(messages, pretty=False), end="", flush=True)
+    print(history_to_string(history[1:], pretty=False), end="", flush=True)
 
 
 if __name__ == "__main__":

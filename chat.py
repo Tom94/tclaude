@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+import common
+
+# Print prompt before doing anything else to hide startup delay (which is caused by importing dependencies).
+HELP_TEXT = common.wrap_style("Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.", "38;5;245m")
+print(f"{common.prompt_style(common.CHEVRON)} {HELP_TEXT}{common.ansi('3G')}", end="", flush=True)
+
 import datetime
 import json
 import os
@@ -7,7 +13,6 @@ import sys
 
 from io import StringIO
 
-import common
 from print import history_to_string
 from prompt import stream_response, TokenCounter
 
@@ -39,6 +44,7 @@ def create_prompt_key_bindings():
 
 
 def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
+    print(f"\r", end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
         user_input = prompt_session.prompt(
@@ -47,7 +53,7 @@ def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_b
             vi_mode=True,
             cursor=ModalCursorShapeConfig(),
             multiline=True,
-            placeholder=HTML(f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"),
+            placeholder=ANSI(HELP_TEXT),
             key_bindings=key_bindings,
         ).strip()
 

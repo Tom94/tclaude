@@ -105,16 +105,18 @@ def write_assistant_message(message: dict, io: StringIO):
     if block_type is not None:
         io.write("\n\n")
 
-    if references:
-        for k, v in sorted(references.items(), key=lambda x: x[1]["id"]):
-            io.write(f"{to_superscript(v['id'])} {k} - {v['title']}\n")
-            for val in sorted(v["cited_texts"]):
-                io.write(f'   "{val}"\n')
-        io.write("\n")
+    stop_reason = message.get("stop_reason")
 
-    stop_reason = message.get("stop_reason", "end_turn")
-    if stop_reason != "end_turn":
-        io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
+    if stop_reason is not None:
+        if references:
+            for k, v in sorted(references.items(), key=lambda x: x[1]["id"]):
+                io.write(f"{to_superscript(v['id'])} {k} - {v['title']}\n")
+                for val in sorted(v["cited_texts"]):
+                    io.write(f'   "{val}"\n')
+            io.write("\n")
+
+        if stop_reason != "end_turn":
+            io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
 def history_to_string(history: list[dict], pretty: bool, wrap_width: int | None = None) -> str:

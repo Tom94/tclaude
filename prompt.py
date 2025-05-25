@@ -5,6 +5,7 @@ import os
 import sys
 import requests
 import subprocess
+from typing import Callable, Iterator
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
@@ -29,7 +30,9 @@ IS_ATTY = sys.stdout.isatty()
 
 
 class TokenCounter:
-    def __init__(self, cache_creation_input_tokens=0, cache_read_input_tokens=0, input_tokens=0, output_tokens=0):
+    def __init__(
+        self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0
+    ):
         self.cache_creation = cache_creation_input_tokens
         self.cache_read = cache_read_input_tokens
         self.input = input_tokens
@@ -43,7 +46,7 @@ class TokenCounter:
         result.output = self.output + other.output
         return result
 
-    def cost(self, model: str):
+    def cost(self, model: str) -> tuple[float, float, float, float]:
         cost_factor = 1.0
         if "opus" in model:
             cost_factor = 5.0
@@ -79,13 +82,13 @@ class TokenCounter:
         )
 
 
-def get_gcp_access_token():
+def get_gcp_access_token() -> str:
     cmd = ["gcloud", "auth", "print-access-token"]
     token = subprocess.check_output(cmd).decode("utf-8").strip()
     return token
 
 
-def get_endpoint_vertex(model: str) -> tuple:
+def get_endpoint_vertex(model: str) -> tuple[str, dict, dict]:
     if not VERTEX_API_PROJECT:
         raise ValueError("VERTEX_API_PROJECT environment variables are required")
 
@@ -103,7 +106,7 @@ def get_endpoint_vertex(model: str) -> tuple:
     return url, headers, params
 
 
-def get_endpoint_anthropic(model: str) -> tuple:
+def get_endpoint_anthropic(model: str) -> tuple[str, dict, dict]:
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 
@@ -123,7 +126,7 @@ def get_endpoint_anthropic(model: str) -> tuple:
     return url, headers, params
 
 
-def stream_events(url, headers, params):
+def stream_events(url: str, headers: dict, params: dict) -> Iterator[dict]:
     """
     Stream events using requests.
     """
@@ -139,21 +142,23 @@ def stream_events(url, headers, params):
 
 
 def stream_response(
-    user_input,
-    model,
-    history=[],
-    max_tokens=16384,
-    enable_web_search=True,
-    enable_code_exec=True,
-    system_prompt=None,
-    enable_thinking=False,
-    thinking_budget=None,
-    write_cache=False,
-    on_response_update=None,
-):
+    model: str,
+    history: list[dict] = [],
+    max_tokens: int = 16384,
+    enable_web_search: bool = True,
+    enable_code_exec: bool = True,
+    system_prompt: str | None = None,
+    enable_thinking: bool = False,
+    thinking_budget: int | None = None,
+    write_cache: bool = False,
+    on_response_update: Callable[[list[dict], TokenCounter], None] | None = None,
+) -> tuple[list[dict], TokenCounter]:
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.
     """
+
+    if not history or history[-1].get("role", "") != "user":
+        raise ValueError("The last message in history must be the user prompt.")
 
     if "3-5" in model:
         # Disable features not supported by the 3.5 models
@@ -164,8 +169,6 @@ def stream_response(
 
     url, headers, params = get_endpoint_anthropic(model)
     # url, headers, params = get_endpoint_vertex("claude-sonnet-4@20250514")
-
-    history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
 
     if write_cache:
         # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use
@@ -197,12 +200,16 @@ def stream_response(
     params["stream"] = True
 
     # Add system prompt if provided. Always cache it.
-    if system_prompt:
+    if system_prompt is not None:
         params["system"] = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
 
     # Add extended thinking if enabled
     if enable_thinking:
-        thinking_config = {"type": "enabled", "budget_tokens": thinking_budget if thinking_budget else max(1024, max_tokens // 2)}
+        thinking_config = {
+            "type": "enabled",
+            "budget_tokens": thinking_budget if thinking_budget is not None else max(1024, max_tokens // 2),
+        }
+
         params["thinking"] = thinking_config
 
     # Add web search tool if enabled
@@ -232,7 +239,7 @@ def stream_response(
 
     tokens = TokenCounter()
     for data in stream_events(url, headers, params):
-        kind = data.get("type")
+        kind = data.get("type", "")
 
         if "message" in kind:
             # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
@@ -322,7 +329,6 @@ def stream_response(
         if on_response_update is not None:
             on_response_update(messages, tokens)
 
-    history.extend(messages)
     return messages, tokens
 
 
@@ -354,10 +360,11 @@ def main():
             return
 
     # The response is already printed during streaming, so we don't need to print it again
+    history = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
+
     messages, _ = stream_response(
-        user_input,
         model=args.model,
-        history=[],
+        history=history,
         max_tokens=args.max_tokens,
         enable_web_search=not args.no_web_search,  # Web search is enabled by default
         enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default

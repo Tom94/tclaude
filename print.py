@@ -16,7 +16,7 @@ def to_superscript(text: str | int) -> str:
     return text.translate(superscript_map)
 
 
-def history_to_string(history, pretty, wrap_width: int | None = None):
+def history_to_string(history: list[dict], pretty: bool, wrap_width: int | None = None) -> str:
     io = StringIO()
     for message in history:
         if message["role"] == "system":

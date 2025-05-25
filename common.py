@@ -104,7 +104,7 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def pretty_print_md(string, wrap_width: int | None = None) -> str:
+def pretty_print_md(string: str, wrap_width: int | None = None) -> str:
     """
     Turn string pretty by piping it through bat
     """

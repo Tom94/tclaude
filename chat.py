@@ -99,7 +99,7 @@ def main():
             term_width = os.get_terminal_size().columns
             term_height = os.get_terminal_size().lines
 
-            def reprint_current_response(messages, _, max_height: int | None = term_height):
+            def reprint_current_response(messages: list[dict], _: TokenCounter, max_height: int | None = term_height):
                 nonlocal num_newlines_printed
 
                 to_print = StringIO()
@@ -120,20 +120,33 @@ def main():
                 print(to_print.getvalue().rstrip(), end="", flush=True)
                 num_newlines_printed = len(lines) - 1
 
-            # The response is already printed during streaming, so we don't need to print it again
-            messages, tokens = stream_response(
-                user_input,
-                model=args.model,
-                history=history,
-                max_tokens=args.max_tokens,
-                enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                system_prompt=system_prompt,
-                enable_thinking=args.thinking,
-                thinking_budget=args.thinking_budget,
-                write_cache=write_cache,
-                on_response_update=reprint_current_response,
-            )
+            history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
+            user_input = ""
+
+            try:
+                # The response is already printed during streaming, so we don't need to print it again
+                messages, tokens = stream_response(
+                    model=args.model,
+                    history=history,
+                    max_tokens=args.max_tokens,
+                    enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                    enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                    system_prompt=system_prompt,
+                    enable_thinking=args.thinking,
+                    thinking_budget=args.thinking_budget,
+                    write_cache=write_cache,
+                    on_response_update=reprint_current_response,
+                )
+            except KeyboardInterrupt:
+                history.pop()
+                print("\n\nResponse interrupted by user.\n")
+                continue
+            except Exception as e:
+                history.pop()
+                print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
+                continue
+
+            history.extend(messages)
 
             # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
             reprint_current_response(messages, tokens, None)
@@ -154,18 +167,15 @@ def main():
             write_cache = cache_read_cost < input_cost
 
             # An empty line between each prompt
-            print()
-            print()
+            print("\n")
 
             if args.verbose:
                 tokens.print_tokens()
                 tokens.print_cost(args.model)
                 if write_cache:
-                    print("Next prompt will be cached.")
-                    print()
+                    print("Next prompt will be cached.\n")
 
             received_response = True
-            user_input = ""
     except KeyboardInterrupt:
         pass
     except EOFError:
@@ -178,19 +188,30 @@ def main():
         session_path = args.session
         if session_path is None:
             print("Auto-naming session file...")
-            messages, tokens = stream_response(
-                "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you.",
-                model=args.model,
-                history=history.copy(),  # Using a copy ensures we don't modify the original history
-                max_tokens=30,
-                enable_web_search=False,
-                system_prompt=system_prompt,
-                enable_thinking=False,
+            autoname_prompt = (
+                "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
             )
 
-            total_tokens += tokens
+            history.append({"role": "user", "content": [{"type": "text", "text": autoname_prompt}]})
+            try:
+                messages, tokens = stream_response(
+                    model=args.model,
+                    history=history,
+                    max_tokens=30,
+                    enable_web_search=False,
+                    system_prompt=system_prompt,
+                    enable_thinking=False,
+                )
 
-            session_name = history_to_string(messages, pretty=False)
+                total_tokens += tokens
+
+                session_name = history_to_string(messages, pretty=False)
+            except Exception as e:
+                print(f"Error auto-naming session: {e}")
+                print(f"Falling back to time stamp.")
+                session_name = datetime.datetime.now().strftime("%H-%M-%S")
+            finally:
+                history.pop()
 
             print(f"Session name: {session_name}")
 

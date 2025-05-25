@@ -81,6 +81,14 @@ def main():
                 def _(event):
                     event.app.current_buffer.newline()
 
+                @bindings.add("c-p")
+                def _(event):
+                    event.app.current_buffer.history_backward()
+
+                @bindings.add("c-n")
+                def _(event):
+                    event.app.current_buffer.history_forward()
+
                 rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
                 user_input = prompt_session.prompt(
                     ANSI(common.prompt_style(f"{common.CHEVRON} ")),

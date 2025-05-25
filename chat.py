@@ -16,6 +16,28 @@ from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
 
 
+def create_prompt_key_bindings():
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _(event):
+        event.app.current_buffer.validate_and_handle()
+
+    @bindings.add("\\", "enter")
+    def _(event):
+        event.app.current_buffer.newline()
+
+    @bindings.add("c-p")
+    def _(event):
+        event.app.current_buffer.history_backward()
+
+    @bindings.add("c-n")
+    def _(event):
+        event.app.current_buffer.history_forward()
+
+    return bindings
+
+
 def main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
@@ -41,6 +63,7 @@ def main():
             print(f"Error reading system prompt file: {e}")
             return
 
+    prompt_key_bindings = create_prompt_key_bindings()
     prompt_session = PromptSession()
 
     # Initialize or load messages history
@@ -71,24 +94,6 @@ def main():
     try:
         while True:
             if not user_input:
-                bindings = KeyBindings()
-
-                @bindings.add("enter")
-                def _(event):
-                    event.app.current_buffer.validate_and_handle()
-
-                @bindings.add("\\", "enter")
-                def _(event):
-                    event.app.current_buffer.newline()
-
-                @bindings.add("c-p")
-                def _(event):
-                    event.app.current_buffer.history_backward()
-
-                @bindings.add("c-n")
-                def _(event):
-                    event.app.current_buffer.history_forward()
-
                 rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
                 user_input = prompt_session.prompt(
                     ANSI(common.prompt_style(f"{common.CHEVRON} ")),
@@ -99,7 +104,7 @@ def main():
                     placeholder=HTML(
                         f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"
                     ),
-                    key_bindings=bindings,
+                    key_bindings=prompt_key_bindings,
                 ).strip()
                 if not user_input:
                     continue

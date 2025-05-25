@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
 
 import common
+import os
+import json
+from print import history_to_string
 
-# Print prompt before doing anything else to hide startup delay (which is caused by importing dependencies).
+# Print prompt and load/print history before importing any other modules to hide startup delay of slower imports.
+# This makes a huge difference in perceived responsiveness when launching the interactive CLI.
+args = common.parse_args()
+
+history = []
+if args.session and os.path.exists(args.session):
+    try:
+        with open(args.session, "r") as f:
+            history = json.load(f)
+            print(history_to_string(history, pretty=True))
+    except json.JSONDecodeError:
+        print(f"Error: Could not parse session file {args.session}. Starting new session.")
+
 HELP_TEXT = common.wrap_style("Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.", "38;5;245m")
 print(f"{common.prompt_style(common.CHEVRON)} {HELP_TEXT}{common.ansi('3G')}", end="", flush=True)
 
+import asyncio
 import datetime
-import json
-import os
 import sys
 
 from io import StringIO
 
-from print import history_to_string
 from prompt import stream_response, TokenCounter
 
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI, HTML
@@ -43,11 +56,11 @@ def create_prompt_key_bindings():
     return bindings
 
 
-def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
-    print(f"\r", end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
+async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
+    print(common.ansi('1G'), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
-        user_input = prompt_session.prompt(
+        user_input = await prompt_session.prompt_async(
             ANSI(common.prompt_style(lprompt)),
             rprompt=ANSI(common.prompt_style(rprompt)),
             vi_mode=True,
@@ -55,9 +68,9 @@ def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_b
             multiline=True,
             placeholder=ANSI(HELP_TEXT),
             key_bindings=key_bindings,
-        ).strip()
+        )
 
-    return user_input
+    return user_input.strip()
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -76,7 +89,7 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-def main():
+async def async_main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -101,27 +114,16 @@ def main():
             print(f"Error reading system prompt file: {e}")
             return
 
+    initial_history_length = len(history)
+
     prompt_key_bindings = create_prompt_key_bindings()
     prompt_session = PromptSession()
 
-    # Initialize or load messages history
-    history = []
-    if args.session and os.path.exists(args.session):
-        try:
-            with open(args.session, "r") as f:
-                history = json.load(f)
-                for message in history:
-                    if message.get("role") == "user":
-                        text = message.get("content", [{}])[0].get("text", "")
-                        if text:
-                            prompt_session.history.append_string(text)
-
-                print(history_to_string(history, pretty=True))
-        except json.JSONDecodeError:
-            print(f"Error: Could not parse session file {args.session}. Starting new session.")
-            return
-
-    initial_history_length = len(history)
+    for message in history:
+        if message.get("role") == "user":
+            text = message.get("content", [{}])[0].get("text", "")
+            if text:
+                prompt_session.history.append_string(text)
 
     total_tokens = TokenCounter()
 
@@ -164,7 +166,7 @@ def main():
                 if not user_input:
                     lprompt = f"{common.CHEVRON} "
                     rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
-                    user_input = user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
+                    user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 else:
                     prompt_session.history.append_string(user_input)
                     print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
@@ -277,6 +279,10 @@ def main():
         if args.verbose:
             total_tokens.print_tokens()
             total_tokens.print_cost(args.model)
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

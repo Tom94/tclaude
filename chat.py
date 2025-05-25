@@ -91,56 +91,63 @@ def main():
     write_cache = False
     running_cost = 0.0
 
+    # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+    num_newlines_printed = 0
+
+    def reprint_current_response(messages: list[dict], _: TokenCounter, limit_to_terminal_height: bool = True):
+        nonlocal num_newlines_printed
+
+        to_print = StringIO()
+        to_print.write("\033[F" * num_newlines_printed)
+        to_print.write("\r")
+
+        term_width = os.get_terminal_size().columns
+        term_height = os.get_terminal_size().lines
+
+        # Print the last term_height - 1 lines of the history to avoid terminal problems
+        current_message = history_to_string(messages, pretty=True, wrap_width=term_width - 1)
+        lines = current_message.split("\n")
+
+        if limit_to_terminal_height:
+            if len(lines) >= term_height:
+                lines = lines[-(term_height - 1) :]
+
+        for line in lines:
+            to_print.write(f"\033[K{line}\n")
+
+        print(to_print.getvalue().rstrip(), end="", flush=True)
+        num_newlines_printed = len(lines) - 1
+
+    is_user_turn = True
     try:
         while True:
-            if not user_input:
-                rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
-                user_input = prompt_session.prompt(
-                    ANSI(common.prompt_style(f"{common.CHEVRON} ")),
-                    rprompt=ANSI(common.prompt_style(rprompt)),
-                    vi_mode=True,
-                    cursor=ModalCursorShapeConfig(),
-                    multiline=True,
-                    placeholder=HTML(
-                        f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"
-                    ),
-                    key_bindings=prompt_key_bindings,
-                ).strip()
-                if not user_input:
-                    continue
-            else:
-                prompt_session.history.append_string(user_input)
-                print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
-
-            # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
             num_newlines_printed = 0
 
-            term_width = os.get_terminal_size().columns
-            term_height = os.get_terminal_size().lines
+            if is_user_turn:
+                if not user_input:
+                    rprompt = f"{running_cost:.03f}   {common.friendly_model_name(args.model)} "
+                    user_input = prompt_session.prompt(
+                        ANSI(common.prompt_style(f"{common.CHEVRON} ")),
+                        rprompt=ANSI(common.prompt_style(rprompt)),
+                        vi_mode=True,
+                        cursor=ModalCursorShapeConfig(),
+                        multiline=True,
+                        placeholder=HTML(
+                            f"<gray>Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.</gray>"
+                        ),
+                        key_bindings=prompt_key_bindings,
+                    ).strip()
+                    if not user_input:
+                        continue
+                else:
+                    prompt_session.history.append_string(user_input)
+                    print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
 
-            def reprint_current_response(messages: list[dict], _: TokenCounter, max_height: int | None = term_height):
-                nonlocal num_newlines_printed
-
-                to_print = StringIO()
-                to_print.write("\033[F" * num_newlines_printed)
-                to_print.write("\r")
-
-                # Print the last term_height - 1 lines of the history to avoid terminal problems
-                current_message = history_to_string(messages, pretty=True, wrap_width=term_width - 1)
-                lines = current_message.split("\n")
-
-                if max_height is not None:
-                    if len(lines) >= max_height:
-                        lines = lines[-(max_height - 1) :]
-
-                for line in lines:
-                    to_print.write(f"\033[K{line}\n")
-
-                print(to_print.getvalue().rstrip(), end="", flush=True)
-                num_newlines_printed = len(lines) - 1
-
-            history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
-            user_input = ""
+                history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
+                user_input = ""
+            else:
+                # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
+                pass
 
             try:
                 # The response is already printed during streaming, so we don't need to print it again
@@ -156,19 +163,32 @@ def main():
                     write_cache=write_cache,
                     on_response_update=reprint_current_response,
                 )
+
+                stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
+                if stop_reason == "pause_turn":
+                    is_user_turn = False
+                elif stop_reason == "tool_use":
+                    is_user_turn = False
+                    print("Warning: tool use detected, but not implemented yet.")
+                else:
+                    is_user_turn = True
             except KeyboardInterrupt:
-                history.pop()
+                if is_user_turn:
+                    history.pop()
                 print("\n\nResponse interrupted by user.\n")
+                is_user_turn = True
                 continue
             except Exception as e:
-                history.pop()
+                if is_user_turn:
+                    history.pop()
                 print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
+                is_user_turn = True
                 continue
 
             history.extend(messages)
 
             # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
-            reprint_current_response(messages, tokens, None)
+            reprint_current_response(messages, tokens, limit_to_terminal_height=False)
 
             total_tokens += tokens
             running_cost = total_tokens.total_cost(args.model)
@@ -225,14 +245,15 @@ def main():
                 total_tokens += tokens
 
                 session_name = history_to_string(messages, pretty=False)
+            except KeyboardInterrupt:
+                print("\n\nSession naming interrupted by user. Falling back to time stamp.")
+                session_name = datetime.datetime.now().strftime("%H-%M-%S")
             except Exception as e:
                 print(f"Error auto-naming session: {e}")
                 print(f"Falling back to time stamp.")
                 session_name = datetime.datetime.now().strftime("%H-%M-%S")
             finally:
                 history.pop()
-
-            print(f"Session name: {session_name}")
 
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
             session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
@@ -248,9 +269,6 @@ def main():
         if args.verbose:
             total_tokens.print_tokens()
             total_tokens.print_cost(args.model)
-
-        print(f"Total cost: ${total_tokens.total_cost(args.model):.2f}")
-
 
 if __name__ == "__main__":
     main()

@@ -362,16 +362,27 @@ def main():
     # The response is already printed during streaming, so we don't need to print it again
     history = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
 
-    messages, _ = stream_response(
-        model=args.model,
-        history=history,
-        max_tokens=args.max_tokens,
-        enable_web_search=not args.no_web_search,  # Web search is enabled by default
-        enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-        system_prompt=system_prompt,
-        enable_thinking=args.thinking,
-        thinking_budget=args.thinking_budget,
-    )
+    while True:
+        messages, _ = stream_response(
+            model=args.model,
+            history=history,
+            max_tokens=args.max_tokens,
+            enable_web_search=not args.no_web_search,  # Web search is enabled by default
+            enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+            system_prompt=system_prompt,
+            enable_thinking=args.thinking,
+            thinking_budget=args.thinking_budget,
+        )
+        history.extend(messages)
+
+        stop_reason = history[-1].get("stop_reason")
+        if stop_reason == "pause_turn":
+            continue
+        elif stop_reason == "tool_use":
+            print("Warning: tool use detected, but not implemented yet.")
+            break
+        else:
+            break
 
     print(history_to_string(messages, pretty=False), end="", flush=True)
 

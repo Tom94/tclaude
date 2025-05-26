@@ -115,7 +115,12 @@ async def async_main(args, history: list[dict]):
 
     session_name = None
     if args.session:
-        session_name = os.path.splitext(os.path.basename(args.session))[0]
+        session_name = os.path.basename(args.session)
+
+        # If the session is a json file, the session name is the file name without the extension
+        stem, ext = os.path.splitext(session_name)
+        if ext.lower() == ".json":
+            session_name = stem
 
     initial_history_length = len(history)
 
@@ -216,122 +221,118 @@ async def async_main(args, history: list[dict]):
         return rprompt
 
     is_user_turn = True
-    try:
-        while True:
-            num_newlines_printed = 0
+    while True:
+        num_newlines_printed = 0
 
-            if is_user_turn:
-                if not user_input:
+        if is_user_turn:
+            if not user_input:
+                try:
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
-                else:
-                    prompt_session.history.append_string(user_input)
-                    print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
-
-                history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
-                user_input = ""
+                except (EOFError, KeyboardInterrupt):
+                    break
             else:
-                # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
-                pass
+                prompt_session.history.append_string(user_input)
+                print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
 
-            def on_response_interrupt():
-                nonlocal is_user_turn
-                if is_user_turn:
-                    history.pop()
-                is_user_turn = True
+            history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
+            user_input = ""
+        else:
+            # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
+            pass
 
-            try:
-                # The response is already printed during streaming, so we don't need to print it again
-                messages, tokens, call_again = await stream_response(
-                    model=args.model,
-                    history=history,
-                    max_tokens=args.max_tokens,
-                    enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                    enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                    system_prompt=system_prompt,
-                    enable_thinking=args.thinking,
-                    thinking_budget=args.thinking_budget,
-                    write_cache=write_cache,
-                    on_response_update=reprint_current_response,
-                    update_interval=1 / SPINNER_FPS,
+        try:
+            # The response is already printed during streaming, so we don't need to print it again
+            messages, tokens, call_again = await stream_response(
+                model=args.model,
+                history=history,
+                max_tokens=args.max_tokens,
+                enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                system_prompt=system_prompt,
+                enable_thinking=args.thinking,
+                thinking_budget=args.thinking_budget,
+                write_cache=write_cache,
+                on_response_update=reprint_current_response,
+                update_interval=1 / SPINNER_FPS,
+            )
+
+            is_user_turn = not call_again
+        except (KeyboardInterrupt, Exception) as e:
+            if is_user_turn:
+                history.pop()
+            is_user_turn = True
+
+            if isinstance(e, KeyboardInterrupt):
+                print("\n\nResponse interrupted by user.\n")
+            else:
+                print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
+
+            continue
+
+        history.extend(messages)
+        total_tokens += tokens
+
+        # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
+        reprint_current_response(messages, tokens, limit_to_terminal_height=False)
+
+        # Automatically determine whether we should put a cache breakpoint into the next prompt
+        write_cache = should_cache(tokens, args.model)
+
+        print("\n")
+        if args.verbose:
+            tokens.print_tokens()
+            tokens.print_cost(args.model)
+            if write_cache:
+                print("Next prompt will be cached.\n")
+
+        # Start a background task to auto-name the session if it is not already named
+        if session_name is None:
+            if autoname_task is None and is_user_turn:
+                autoname_prompt = (
+                    "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
                 )
 
-                is_user_turn = not call_again
-            except KeyboardInterrupt:
-                print("\n\nResponse interrupted by user.\n")
-                on_response_interrupt()
-                continue
-            except Exception as e:
-                print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
-                on_response_interrupt()
-                continue
-
-            if not messages:
-                print("\n\nNo response received. Please try again.\n")
-                on_response_interrupt()
-                continue
-
-            history.extend(messages)
-            total_tokens += tokens
-
-            # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
-            reprint_current_response(messages, tokens, limit_to_terminal_height=False)
-
-            # Automatically determine whether we should put a cache breakpoint into the next prompt
-            write_cache = should_cache(tokens, args.model)
-
-            print("\n")
-            if args.verbose:
-                tokens.print_tokens()
-                tokens.print_cost(args.model)
-                if write_cache:
-                    print("Next prompt will be cached.\n")
-
-            # Start a background task to auto-name the session if it is not already named
-            if session_name is None:
-                if autoname_task is None and is_user_turn:
-                    autoname_prompt = (
-                        "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
+                autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
+                autoname_task = asyncio.create_task(
+                    stream_response(
+                        model=args.model,
+                        history=autoname_history,
+                        max_tokens=30,
+                        enable_web_search=False,
+                        system_prompt=system_prompt,
+                        enable_thinking=False,
                     )
-
-                    autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
-                    autoname_task = asyncio.create_task(
-                        stream_response(
-                            model=args.model,
-                            history=autoname_history,
-                            max_tokens=30,
-                            enable_web_search=False,
-                            system_prompt=system_prompt,
-                            enable_thinking=False,
-                        )
-                    )
-
-    except KeyboardInterrupt:
-        pass
-    except EOFError:
-        pass
+                )
 
     print()
 
-    # If we submitted a user prompt and received a response (at least 2 messages), save the session
+    # If we submitted a user prompt and received a response (at least 2 messages), save the session.
     if len(history) - initial_history_length >= 2:
-        session_path = args.session
-
-        if session_path is None:
+        # To obtain the path to save to, we follow these rules:
+        # 1. If no session name is provided, we use the autoname task result if available.
+        # 2. If the path does not end with .json, we append .json.
+        # 3. If the path does not exist, we prepend the sessions directory.
+        # 4. We write the session file regardless of whether the final path exists or not.
+        if session_name is None:
             if autoname_task is not None:
                 session_name = await handle_autoname_result(autoname_task)
 
-            if session_name is not None:
-                session_path = os.path.join(args.sessions_dir, session_name)
+        if session_name:
+            session_path = session_name
+            if not session_path.lower().endswith(".json"):
+                session_path += ".json"
 
-        if session_path is not None:
+            if not os.path.isfile(session_path):
+                session_path = os.path.join(args.sessions_dir, session_path)
+
             with open(session_path, "w") as f:
                 json.dump(history, f, indent=2)
 
             print(f"✓ Saved session to {session_path}")
 
-            if args.verbose:
-                total_tokens.print_tokens()
-                total_tokens.print_cost(args.model)
+    if args.verbose:
+        total_tokens.print_tokens()
+        total_tokens.print_cost(args.model)
 
 
 def main_with_args_and_history(args, history: list[dict]):
@@ -341,7 +342,7 @@ def main_with_args_and_history(args, history: list[dict]):
 def main():
     args = common.parse_args()
 
-    history = common.load_session(args.session) if args.session else []
+    history = common.load_session_if_exists(args.session, args.sessions_dir)
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
 

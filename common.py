@@ -117,101 +117,6 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def word_wrap(text: str, wrap_width: int) -> str:
-    if not text or wrap_width is None or wrap_width <= 0:
-        return text
-
-    lines = []
-
-    for line in text.split("\n"):
-        # Preserve empty lines
-        if not line.strip():
-            lines.append(line)
-            continue
-
-        # Detect indentation of the original line
-        stripped_line = line.lstrip()
-        indent = line[: len(line) - len(stripped_line)]
-
-        # If the line fits within wrap_width, keep it as is
-        if len(line) <= wrap_width:
-            lines.append(line)
-            continue
-
-        # Wrap the line while preserving indentation
-        current_line = []
-        words = stripped_line.split()
-
-        for word in words:
-            # If a single word is longer than the available width, split it
-            available_width = wrap_width - len(indent)
-            if len(word) > available_width and available_width > 0:
-                # First, add any current line content
-                if current_line:
-                    lines.append(indent + " ".join(current_line))
-                    current_line = []
-
-                # Split the long word into chunks
-                while len(word) > available_width:
-                    lines.append(indent + word[:available_width])
-                    word = word[available_width:]
-
-                # Add the remaining part of the word
-                if word:
-                    current_line = [word]
-            else:
-                test_line = " ".join(current_line + [word])
-                if len(indent + test_line) > wrap_width and current_line:
-                    lines.append(indent + " ".join(current_line))
-                    current_line = [word]
-                else:
-                    current_line.append(word)
-
-        if current_line:
-            lines.append(indent + " ".join(current_line))
-
-    return "\n".join(lines)
-
-
-def char_wrap(text: str, wrap_width: int) -> str:
-    """
-    Wrap text by characters instead of words, preserving indentation.
-    """
-    if not text or wrap_width is None or wrap_width <= 0:
-        return text
-
-    lines = []
-
-    for line in text.split("\n"):
-        # Preserve empty lines
-        if not line.strip():
-            lines.append(line)
-            continue
-
-        # Detect indentation of the original line
-        stripped_line = line.lstrip()
-        indent = line[: len(line) - len(stripped_line)]
-
-        # If the line fits within wrap_width, keep it as is
-        if len(line) <= wrap_width:
-            lines.append(line)
-            continue
-
-        # Wrap the line by characters while preserving indentation
-        current_line = []
-        for i in range(0, len(stripped_line), wrap_width):
-            chunk = stripped_line[i : i + wrap_width]
-            if current_line:
-                lines.append(indent + " ".join(current_line))
-                current_line = []
-            current_line.append(chunk)
-
-        if current_line:
-            lines.append(indent + " ".join(current_line))
-
-    return "\n".join(lines)
-
-
 def bat_syntax_highlight(string: str, language: str) -> str:
     """
     Turn string pretty by piping it through bat
@@ -236,3 +141,130 @@ def bat_syntax_highlight(string: str, language: str) -> str:
     except FileNotFoundError:
         # If bat is not installed, fall back to regular print
         return string
+
+
+def char_wrap(text: str, wrap_width: int) -> str:
+    """
+    Wrap text by characters instead of words, preserving indentation.
+    """
+    if not text or wrap_width is None or wrap_width <= 0:
+        return text
+
+    from wcwidth import wcswidth
+
+    def get_width(s):
+        """Get display width of string, fallback to len if wcswidth returns None"""
+        width = wcswidth(s)
+        return width if width is not None else len(s)
+
+    lines = []
+
+    for line in text.split("\n"):
+        # Preserve empty lines
+        if not line.strip():
+            lines.append(line)
+            continue
+
+        # Detect indentation of the original line
+        stripped_line = line.lstrip()
+        indent = line[: len(line) - len(stripped_line)]
+        indent_width = get_width(indent)
+
+        # If the line fits within wrap_width, keep it as is
+        if get_width(line) <= wrap_width:
+            lines.append(line)
+            continue
+
+        # Wrap the line by characters while preserving indentation
+        current_chunk = ""
+        current_width = indent_width
+
+        for char in stripped_line:
+            char_width = get_width(char)
+            if current_width + char_width > wrap_width and current_chunk:
+                lines.append(indent + current_chunk)
+                current_chunk = char
+                current_width = indent_width + char_width
+            else:
+                current_chunk += char
+                current_width += char_width
+
+        if current_chunk:
+            lines.append(indent + current_chunk)
+
+    return "\n".join(lines)
+
+
+def word_wrap(text: str, wrap_width: int) -> str:
+    if not text or wrap_width is None or wrap_width <= 0:
+        return text
+
+    from wcwidth import wcswidth
+
+    def get_width(s):
+        """Get display width of string, fallback to len if wcswidth returns None"""
+        width = wcswidth(s)
+        return width if width is not None else len(s)
+
+    lines = []
+
+    for line in text.split("\n"):
+        # Preserve empty lines
+        if not line.strip():
+            lines.append(line)
+            continue
+
+        # Detect indentation of the original line
+        stripped_line = line.lstrip()
+        indent = line[: len(line) - len(stripped_line)]
+        indent_width = get_width(indent)
+
+        # If the line fits within wrap_width, keep it as is
+        if get_width(line) <= wrap_width:
+            lines.append(line)
+            continue
+
+        # Wrap the line while preserving indentation
+        current_line = []
+        words = stripped_line.split()
+
+        for word in words:
+            word_width = get_width(word)
+            # If a single word is longer than the available width, split it
+            available_width = wrap_width - indent_width
+            if word_width > available_width and available_width > 0:
+                # First, add any current line content
+                if current_line:
+                    lines.append(indent + " ".join(current_line))
+                    current_line = []
+
+                # Split the long word into chunks by character
+                current_chunk = ""
+                current_chunk_width = 0
+
+                for char in word:
+                    char_width = get_width(char)
+                    if current_chunk_width + char_width > available_width and current_chunk:
+                        lines.append(indent + current_chunk)
+                        current_chunk = char
+                        current_chunk_width = char_width
+                    else:
+                        current_chunk += char
+                        current_chunk_width += char_width
+
+                # Add the remaining part of the word
+                if current_chunk:
+                    current_line = [current_chunk]
+            else:
+                test_line = " ".join(current_line + [word])
+                test_line_width = get_width(indent + test_line)
+                if test_line_width > wrap_width and current_line:
+                    lines.append(indent + " ".join(current_line))
+                    current_line = [word]
+                else:
+                    current_line.append(word)
+
+        if current_line:
+            lines.append(indent + " ".join(current_line))
+
+    return "\n".join(lines)

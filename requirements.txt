@@ -3,4 +3,5 @@ html2text
 partial-json-parser
 prompt_toolkit
 requests
+wcwidth
 

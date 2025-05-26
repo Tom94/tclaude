@@ -8,12 +8,11 @@ from print import history_to_string
 
 def load_history(session) -> list[dict]:
     history = []
-    if os.path.exists(session):
-        try:
-            with open(session, "r") as f:
-                history = json.load(f)
-        except json.JSONDecodeError:
-            print(f"Error: Could not parse session file {session}. Starting new session.")
+    try:
+        with open(session, "r") as f:
+            history = json.load(f)
+    except json.JSONDecodeError:
+        print(f"Error: Could not parse session file {session}. Starting new session.")
 
     return history
 
@@ -48,12 +47,12 @@ import asyncio
 import datetime
 
 from io import StringIO
-
-from prompt import stream_response, TokenCounter
-
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
+from typing import Optional
+
+from prompt import stream_response, TokenCounter
 
 
 def create_prompt_key_bindings():
@@ -112,6 +111,17 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
+def load_system_prompt(role: str) -> Optional[str]:
+    system_prompt = None
+    try:
+        with open(role, "r") as f:
+            system_prompt = f.read().strip()
+    except Exception as e:
+        print(f"Error reading system prompt file: {e}")
+
+    return system_prompt
+
+
 async def async_main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
@@ -123,13 +133,8 @@ async def async_main():
 
     # Read system prompt from file if provided
     system_prompt = None
-    if args.role:
-        try:
-            with open(args.role, "r") as f:
-                system_prompt = f.read().strip()
-        except Exception as e:
-            print(f"Error reading system prompt file: {e}")
-            return
+    if args.role and os.path.exists(args.role):
+        system_prompt = load_system_prompt(args.role)
 
     initial_history_length = len(history)
 

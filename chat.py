@@ -10,6 +10,7 @@ from io import StringIO
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from print import history_to_string
 from prompt import stream_response, TokenCounter
@@ -41,16 +42,17 @@ async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession,
     print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
-        user_input = await prompt_session.prompt_async(
-            ANSI(common.prompt_style(lprompt)),
-            rprompt=ANSI(common.prompt_style(rprompt)),
-            vi_mode=True,
-            cursor=ModalCursorShapeConfig(),
-            multiline=True,
-            wrap_lines=True,
-            placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
-            key_bindings=key_bindings,
-        )
+        with patch_stdout():
+            user_input = await prompt_session.prompt_async(
+                ANSI(common.prompt_style(lprompt)),
+                rprompt=ANSI(common.prompt_style(rprompt)),
+                vi_mode=True,
+                cursor=ModalCursorShapeConfig(),
+                multiline=True,
+                wrap_lines=True,
+                placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
+                key_bindings=key_bindings,
+            )
 
     return user_input.strip()
 
@@ -84,6 +86,10 @@ async def async_main(args, history: list[dict]):
     system_prompt = None
     if args.role:
         system_prompt = common.load_system_prompt(args.role)
+
+    session_name = None
+    if args.session:
+        session_name = os.path.splitext(os.path.basename(args.session))[0]
 
     initial_history_length = len(history)
 
@@ -129,6 +135,29 @@ async def async_main(args, history: list[dict]):
         print(to_print.getvalue().rstrip(), end="", flush=True)
         num_newlines_printed = len(lines) - 1
 
+    async def handle_autoname_result(autoname_task: asyncio.Task) -> str:
+        nonlocal total_tokens
+
+        try:
+            messages, tokens, _ = await autoname_task
+            total_tokens += tokens
+            session_name = history_to_string(messages, pretty=False)
+            print("\r", end="", flush=True)
+        except KeyboardInterrupt:
+            print("interrupted by user.")
+            print("Falling back to time stamp.")
+            session_name = datetime.datetime.now().strftime("%H-%M-%S")
+        except Exception as e:
+            print(f"error auto-naming session: {e}")
+            print(f"Falling back to time stamp.")
+            session_name = datetime.datetime.now().strftime("%H-%M-%S")
+
+        session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
+        session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
+
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+        return f"{date}-{session_name}.json"
+
     is_user_turn = True
     autoname_task = None
     try:
@@ -139,6 +168,12 @@ async def async_main(args, history: list[dict]):
                 if not user_input:
                     lprompt = f"{common.CHEVRON} "
                     rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
+                    if args.role:
+                        prompt_role = os.path.splitext(os.path.basename(args.role))[0]
+                        rprompt = f"󱜙 {prompt_role}  {rprompt}"
+                    if session_name:
+                        rprompt = f" {session_name}  {rprompt}"
+
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 else:
                     prompt_session.history.append_string(user_input)
@@ -181,6 +216,11 @@ async def async_main(args, history: list[dict]):
                 on_response_interrupt()
                 continue
 
+            if not messages:
+                print("\n\nNo response received. Please try again.\n")
+                on_response_interrupt()
+                continue
+
             history.extend(messages)
             total_tokens += tokens
 
@@ -198,23 +238,27 @@ async def async_main(args, history: list[dict]):
                     print("Next prompt will be cached.\n")
 
             # Start a background task to auto-name the session if it is not already named
-            if args.session is None and is_user_turn:
-                print(common.gray_style("Auto-naming session in the background...\n"))
-                autoname_prompt = (
-                    "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
-                )
-
-                autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
-                autoname_task = asyncio.create_task(
-                    stream_response(
-                        model=args.model,
-                        history=autoname_history,
-                        max_tokens=30,
-                        enable_web_search=False,
-                        system_prompt=system_prompt,
-                        enable_thinking=False,
+            if session_name is None:
+                if autoname_task is None and is_user_turn:
+                    print(common.gray_style("Auto-naming session in the background...\n"))
+                    autoname_prompt = (
+                        "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
                     )
-                )
+
+                    autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
+                    autoname_task = asyncio.create_task(
+                        stream_response(
+                            model=args.model,
+                            history=autoname_history,
+                            max_tokens=30,
+                            enable_web_search=False,
+                            system_prompt=system_prompt,
+                            enable_thinking=False,
+                        )
+                    )
+
+                if autoname_task is not None and autoname_task.done():
+                    session_name = await handle_autoname_result(autoname_task)
 
     except KeyboardInterrupt:
         pass
@@ -226,36 +270,23 @@ async def async_main(args, history: list[dict]):
     # If we submitted a user prompt and received a response (at least 2 messages), save the session
     if len(history) - initial_history_length >= 2:
         session_path = args.session
-        if session_path is None and autoname_task is not None:
-            try:
-                messages, tokens, _ = await autoname_task
-                total_tokens += tokens
-                session_name = history_to_string(messages, pretty=False)
-                print("\r", end="", flush=True)
-            except KeyboardInterrupt:
-                print("interrupted by user.")
-                print("Falling back to time stamp.")
-                session_name = datetime.datetime.now().strftime("%H-%M-%S")
-            except Exception as e:
-                print(f"error auto-naming session: {e}")
-                print(f"Falling back to time stamp.")
-                session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
-            session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
-            session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
+        if session_path is None:
+            if autoname_task is not None:
+                session_name = await handle_autoname_result(autoname_task)
 
-            date = datetime.datetime.now().strftime("%Y-%m-%d")
-            session_name = f"{date}-{session_name}.json"
-            session_path = os.path.join(args.sessions_dir, session_name)
+            if session_name is not None:
+                session_path = os.path.join(args.sessions_dir, session_name)
 
-        with open(session_path, "w") as f:
-            json.dump(history, f, indent=2)
+        if session_path is not None:
+            with open(session_path, "w") as f:
+                json.dump(history, f, indent=2)
 
-        print(f"✓ Saved session to {session_path}")
+            print(f"✓ Saved session to {session_path}")
 
-        if args.verbose:
-            total_tokens.print_tokens()
-            total_tokens.print_cost(args.model)
+            if args.verbose:
+                total_tokens.print_tokens()
+                total_tokens.print_cost(args.model)
 
 
 def main(args, history: list[dict]):

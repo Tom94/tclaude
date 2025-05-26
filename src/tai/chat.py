@@ -17,7 +17,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-import common
 import datetime
 import json
 import os
@@ -29,8 +28,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 from typing import Callable, Coroutine, Any
 
-from print import history_to_string
-from prompt import stream_response, TokenCounter
+from . import common
+from .print import history_to_string
+from .prompt import stream_response, TokenCounter
 
 SPINNER_FPS = 10
 

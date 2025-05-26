@@ -17,9 +17,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import common
 
-from print import history_to_string, print_decoy_prompt
+from . import common
+from .print import history_to_string, print_decoy_prompt
 
 
 def main():
@@ -38,7 +38,7 @@ def main():
 
     print_decoy_prompt()
 
-    import chat
+    from . import chat
 
     chat.main_with_args_and_history(args, history)
 

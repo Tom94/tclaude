@@ -6,6 +6,9 @@ name = "tai"
 version = "0.1.0"
 description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "GPL-3.0-only"}
 dependencies = [
     "aiohttp",
     "beautifulsoup4",

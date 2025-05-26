@@ -29,8 +29,8 @@ from io import StringIO
 from partial_json_parser import loads as partial_loads
 from typing import Callable, AsyncIterator, Optional
 
-import common
-from print import history_to_string
+from . import common
+from .print import history_to_string
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5

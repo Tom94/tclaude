@@ -23,8 +23,8 @@ import os
 from io import StringIO
 from typing import Optional, Union
 
-import common
-from common import wrap_style
+from . import common
+from .common import wrap_style
 
 
 def to_superscript(text: Union[str, int]) -> str:

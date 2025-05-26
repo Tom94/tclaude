@@ -342,7 +342,7 @@ def main_with_args_and_history(args, history: list[dict]):
 def main():
     args = common.parse_args()
 
-    history = common.load_session_if_exists(args.session, args.sessions_dir)
+    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
 

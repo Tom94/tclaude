@@ -8,7 +8,6 @@ description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
 dependencies = [
     "aiohttp",
-    "asyncio",
     "beautifulsoup4",
     "html2text",
     "partial-json-parser",

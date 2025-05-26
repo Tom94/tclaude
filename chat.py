@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-import common
-import os
-import json
 import asyncio
+import common
 import datetime
+import json
+import os
 
 from io import StringIO
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
@@ -48,7 +48,7 @@ async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession,
             cursor=ModalCursorShapeConfig(),
             multiline=True,
             wrap_lines=True,
-            placeholder=ANSI(common.wrap_style(common.HELP_TEXT, "38;5;245m")),
+            placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
             key_bindings=key_bindings,
         )
 
@@ -135,6 +135,7 @@ async def async_main(args, history: list[dict]):
         num_newlines_printed = len(lines) - 1
 
     is_user_turn = True
+    autoname_task = None
     try:
         while True:
             num_newlines_printed = 0
@@ -162,7 +163,7 @@ async def async_main(args, history: list[dict]):
 
             try:
                 # The response is already printed during streaming, so we don't need to print it again
-                messages, tokens, call_again = stream_response(
+                messages, tokens, call_again = await stream_response(
                     model=args.model,
                     history=history,
                     max_tokens=args.max_tokens,
@@ -200,6 +201,26 @@ async def async_main(args, history: list[dict]):
                 tokens.print_cost(args.model)
                 if write_cache:
                     print("Next prompt will be cached.\n")
+
+            # Start a background task to auto-name the session if it is not already named
+            if args.session is None and is_user_turn:
+                print(common.gray_style("Auto-naming session in the background...\n"))
+                autoname_prompt = (
+                    "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
+                )
+
+                autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
+                autoname_task = asyncio.create_task(
+                    stream_response(
+                        model=args.model,
+                        history=autoname_history,
+                        max_tokens=30,
+                        enable_web_search=False,
+                        system_prompt=system_prompt,
+                        enable_thinking=False,
+                    )
+                )
+
     except KeyboardInterrupt:
         pass
     except EOFError:
@@ -210,23 +231,9 @@ async def async_main(args, history: list[dict]):
     # If we submitted a user prompt and received a response (at least 2 messages), save the session
     if len(history) - initial_history_length >= 2:
         session_path = args.session
-        if session_path is None:
-            print("Auto-naming session... ", end="", flush=True)
-            autoname_prompt = (
-                "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
-            )
-
-            history.append({"role": "user", "content": [{"type": "text", "text": autoname_prompt}]})
+        if session_path is None and autoname_task is not None:
             try:
-                messages, tokens, _ = stream_response(
-                    model=args.model,
-                    history=history,
-                    max_tokens=30,
-                    enable_web_search=False,
-                    system_prompt=system_prompt,
-                    enable_thinking=False,
-                )
-
+                messages, tokens, _ = await autoname_task
                 total_tokens += tokens
                 session_name = history_to_string(messages, pretty=False)
                 print("\r", end="", flush=True)
@@ -238,8 +245,6 @@ async def async_main(args, history: list[dict]):
                 print(f"error auto-naming session: {e}")
                 print(f"Falling back to time stamp.")
                 session_name = datetime.datetime.now().strftime("%H-%M-%S")
-            finally:
-                history.pop()
 
             session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
             session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -

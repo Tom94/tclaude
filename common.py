@@ -22,6 +22,10 @@ def prompt_style(msg: str) -> str:
     return wrap_style(msg, "0;35m")  # magenta
 
 
+def gray_style(msg: str) -> str:
+    return wrap_style(msg, "38;5;245m")  # gray
+
+
 def input_style(msg: str) -> str:
     return wrap_style(msg, "1m")  # bold
 

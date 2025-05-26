@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 
+import aiohttp
+import asyncio
+import importlib
+import inspect
 import json
 import os
-import sys
-import requests
 import subprocess
-import inspect
-import importlib
-from typing import Callable, Iterator, Optional
+import sys
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
+from typing import Callable, AsyncIterator, Optional
 
 import common
 from print import history_to_string
@@ -97,7 +98,7 @@ def get_tool_definitions() -> list[dict]:
     return tool_definitions
 
 
-def use_tools(messages: list[dict]) -> dict:
+async def use_tools(messages: list[dict]) -> dict:
     """
     Use the tools specified in the messages to perform actions.
     This function is called when the model indicates that it wants to use a tool.
@@ -110,7 +111,7 @@ def use_tools(messages: list[dict]) -> dict:
     if not last_message or last_message.get("role") != "assistant":
         return {"role": "user", "content": tool_results}
 
-    # Process each content block that contains tool use
+    # Process each content block that contains tool use. Tools are run in parallel.
     for content_block in last_message.get("content", []):
         if content_block.get("type") == "tool_use":
             tool_name = content_block.get("name")
@@ -118,29 +119,25 @@ def use_tools(messages: list[dict]) -> dict:
             tool_use_id = content_block.get("id")
 
             if tool_name in available_tools:
-                try:
-                    # Call the tool function with the provided input
-                    result = available_tools[tool_name](**tool_input)
-
-                    # Convert result to string if it's not already
-                    if not isinstance(result, str):
-                        result = str(result)
-
-                    tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": result})
-
-                except Exception as e:
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_id,
-                            "content": f"Error executing tool {tool_name}: {str(e)}",
-                            "is_error": True,
-                        }
-                    )
+                # Call the tool function with the provided input
+                tool_use_task = asyncio.create_task(available_tools[tool_name](**tool_input))
+                tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tool_use_task})
             else:
                 tool_results.append(
                     {"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True}
                 )
+
+    # Wait for all async tool calls to complete
+    for tool_result in tool_results:
+        if isinstance(tool_result["content"], asyncio.Task):
+            try:
+                content = await tool_result["content"]
+                if not isinstance(content, str):
+                    content = str(content)  # Ensure content is a string
+                tool_result["content"] = content
+            except Exception as e:
+                tool_result["content"] = f"Error executing tool: {str(e)}"
+                tool_result["is_error"] = True
 
     return {"role": "user", "content": tool_results}
 
@@ -242,22 +239,20 @@ def get_endpoint_anthropic(model: str) -> tuple[str, dict, dict]:
     return url, headers, params
 
 
-def stream_events(url: str, headers: dict, params: dict) -> Iterator[dict]:
-    """
-    Stream events using requests.
-    """
-    response = requests.post(url, headers=headers, json=params, stream=True)
-    response.raise_for_status()
-    for line in response.iter_lines():
-        if line.startswith(b"data: "):
-            try:
-                yield json.loads(line[6:])
-            except json.JSONDecodeError:
-                print(f"Error decoding JSON: {line[6:]}")
-                continue
+async def stream_events(url: str, headers: dict, params: dict) -> AsyncIterator[dict]:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=params) as response:
+            response.raise_for_status()
+            async for line in response.content:
+                if line.startswith(b"data: "):
+                    try:
+                        yield json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        print(f"Error decoding JSON: {line[6:]}")
+                        continue
 
 
-def stream_response(
+async def stream_response(
     model: str,
     history: list[dict] = [],
     max_tokens: int = 16384,
@@ -358,7 +353,7 @@ def stream_response(
     messages = []
 
     tokens = TokenCounter()
-    for data in stream_events(url, headers, params):
+    async for data in stream_events(url, headers, params):
         kind = data.get("type", "")
 
         if "message" in kind:
@@ -460,14 +455,14 @@ def stream_response(
         call_again = True
     elif stop_reason == "tool_use":
         call_again = True
-        messages.append(use_tools(messages))
+        messages.append(await use_tools(messages))
     else:
         call_again = False
 
     return messages, tokens, call_again
 
 
-def main():
+async def async_main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -499,7 +494,7 @@ def main():
 
     call_again = True
     while call_again:
-        messages, _, call_again = stream_response(
+        messages, _, call_again = await stream_response(
             model=args.model,
             history=history,
             max_tokens=args.max_tokens,
@@ -512,6 +507,10 @@ def main():
         history.extend(messages)
 
     print(history_to_string(history[1:], pretty=False), end="", flush=True)
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

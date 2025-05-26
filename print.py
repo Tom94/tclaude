@@ -276,7 +276,7 @@ def print_decoy_prompt():
     initial_prompt = common.char_wrap(f"  {common.HELP_TEXT}", os.get_terminal_size().columns - 2)
     num_newlines = initial_prompt.count("\n")
     ansi_return = "\033[F" * num_newlines + common.ansi("3G")
-    print(f"{common.prompt_style(common.CHEVRON)} {common.wrap_style(initial_prompt[2:], '38;5;245m')}{ansi_return}", end="", flush=True)
+    print(f"{common.prompt_style(common.CHEVRON)} {common.gray_style(initial_prompt[2:])}{ansi_return}", end="", flush=True)
 
 
 def main():

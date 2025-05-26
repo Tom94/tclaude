@@ -15,3 +15,6 @@ One of the guiding principles of **tai** is to treat Claude API responses as the
 API responses to a common format in order to remain interoperable. Usually, information is lost in this conversion and model-specific
 features like Claude-native web search or code execution either take a while to be implemented or are not implemented at all.
 
+## License
+
+GPLv3; see [LICENSE](LICENSE.txt) for details.

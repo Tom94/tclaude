@@ -51,9 +51,15 @@ async def user_prompt(
     user_input = ""
     while not user_input:
         with patch_stdout():
+            async def animate_prompts():
+                while True:
+                    await asyncio.sleep(1 / SPINNER_FPS)
+                    prompt_session.message = ANSI(common.prompt_style(await lprompt()))
+                    prompt_session.rprompt = ANSI(common.prompt_style(await rprompt()))
 
-            prompt_task = asyncio.create_task(
-                prompt_session.prompt_async(
+            animate_task = asyncio.create_task(animate_prompts())
+            try:
+                user_input = await prompt_session.prompt_async(
                     ANSI(common.prompt_style(await lprompt())),
                     rprompt=ANSI(common.prompt_style(await rprompt())),
                     vi_mode=True,
@@ -64,17 +70,14 @@ async def user_prompt(
                     key_bindings=key_bindings,
                     refresh_interval=1 / SPINNER_FPS,
                 )
-            )
-
-            while not prompt_task.done():
+            finally:
+                animate_task.cancel()
                 try:
-                    await asyncio.sleep(0.01)
-                    prompt_session.message = ANSI(common.prompt_style(await lprompt()))
-                    prompt_session.rprompt = ANSI(common.prompt_style(await rprompt()))
+                    await animate_task
                 except asyncio.CancelledError:
-                    break
+                    pass
 
-            user_input = await prompt_task
+            user_input = user_input.strip()
 
     return user_input.strip()
 

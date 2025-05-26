@@ -3,46 +3,6 @@
 import common
 import os
 import json
-from print import history_to_string
-
-
-def load_history(session) -> list[dict]:
-    history = []
-    try:
-        with open(session, "r") as f:
-            history = json.load(f)
-    except json.JSONDecodeError:
-        print(f"Error: Could not parse session file {session}. Starting new session.")
-
-    return history
-
-
-def print_decoy_prompt():
-    """
-    Reproduce the initial prompt that prompt_toolkit will produce. Requires a bit of bespoke formatting to match exactly.
-    """
-    initial_prompt = common.char_wrap(f"  {HELP_TEXT}", os.get_terminal_size().columns - 2)
-    num_newlines = initial_prompt.count("\n")
-    ansi_return = "\033[F" * num_newlines + common.ansi("3G")
-    print(f"{common.prompt_style(common.CHEVRON)} {common.wrap_style(initial_prompt[2:], '38;5;245m')}{ansi_return}", end="", flush=True)
-
-
-# Print prompt and load/print history before importing any other modules to hide startup delay of slower imports.
-# This makes a huge difference in perceived responsiveness when launching the interactive CLI.
-if __name__ == "__main__":
-    if not os.isatty(0):
-        print(f"chat.py should only be run in interactive mode. Use prompt.py otherwise.")
-        exit(1)
-
-    args = common.parse_args()
-    history = load_history(args.session) if args.session else []
-    if history:
-        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
-
-    HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
-    print_decoy_prompt()
-
-
 import asyncio
 import datetime
 
@@ -50,8 +10,8 @@ from io import StringIO
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
-from typing import Optional
 
+from print import history_to_string
 from prompt import stream_response, TokenCounter
 
 
@@ -88,7 +48,7 @@ async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession,
             cursor=ModalCursorShapeConfig(),
             multiline=True,
             wrap_lines=True,
-            placeholder=ANSI(common.wrap_style(HELP_TEXT, "38;5;245m")),
+            placeholder=ANSI(common.wrap_style(common.HELP_TEXT, "38;5;245m")),
             key_bindings=key_bindings,
         )
 
@@ -111,18 +71,7 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-def load_system_prompt(role: str) -> Optional[str]:
-    system_prompt = None
-    try:
-        with open(role, "r") as f:
-            system_prompt = f.read().strip()
-    except Exception as e:
-        print(f"Error reading system prompt file: {e}")
-
-    return system_prompt
-
-
-async def async_main():
+async def async_main(args, history: list[dict]):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -133,8 +82,13 @@ async def async_main():
 
     # Read system prompt from file if provided
     system_prompt = None
-    if args.role and os.path.exists(args.role):
-        system_prompt = load_system_prompt(args.role)
+    if args.role:
+        try:
+            with open(args.role, "r") as f:
+                system_prompt = f.read().strip()
+        except Exception as e:
+            print(f"Error reading system prompt file: {e}")
+            return
 
     initial_history_length = len(history)
 
@@ -304,9 +258,15 @@ async def async_main():
             total_tokens.print_cost(args.model)
 
 
-def main():
-    asyncio.run(async_main())
+def main(args, history: list[dict]):
+    asyncio.run(async_main(args, history))
 
 
 if __name__ == "__main__":
-    main()
+    args = common.parse_args()
+
+    history = common.load_session(args.session) if args.session else []
+    if history:
+        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
+
+    main(args, history)

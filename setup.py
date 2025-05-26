@@ -5,10 +5,10 @@ from setuptools import setup
 setup(
     name="tai — Terminal AI",
     version="0.1",
-    py_modules=["chat", "print", "prompt", "common"],
+    py_modules=["tai", "chat", "print", "prompt", "common"],
     entry_points={
         "console_scripts": [
-            "tai=chat:main",
+            "tai=tai:main",
         ],
     },
 )

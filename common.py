@@ -5,6 +5,7 @@ import os
 
 
 CHEVRON = ""
+HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
 
 
 def ansi(cmd: str) -> str:
@@ -44,6 +45,20 @@ def default_sessions_dir() -> str:
     if "TAI_SESSIONS_DIR" in os.environ:
         return os.environ["TAI_SESSIONS_DIR"]
     return "."
+
+
+def load_session(session) -> list[dict]:
+    import json
+
+    history = []
+    if os.path.exists(session):
+        try:
+            with open(session, "r") as f:
+                history = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error: Could not parse session file {session}. Starting new session.")
+
+    return history
 
 
 def parse_args():

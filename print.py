@@ -254,7 +254,7 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
             io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
-def history_to_string(history: list[dict], pretty: bool, wrap_width: int) -> str:
+def history_to_string(history: list[dict], pretty: bool, wrap_width: int = 0) -> str:
     tool_results = gather_tool_results(history)
 
     io = StringIO()

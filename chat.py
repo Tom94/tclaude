@@ -5,31 +5,53 @@ import os
 import json
 from print import history_to_string
 
+
+def load_history(session) -> list[dict]:
+    history = []
+    if os.path.exists(session):
+        try:
+            with open(session, "r") as f:
+                history = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error: Could not parse session file {session}. Starting new session.")
+
+    return history
+
+
+def print_decoy_prompt():
+    """
+    Reproduce the initial prompt that prompt_toolkit will produce. Requires a bit of bespoke formatting to match exactly.
+    """
+    initial_prompt = common.char_wrap(f"  {HELP_TEXT}", os.get_terminal_size().columns - 2)
+    num_newlines = initial_prompt.count("\n")
+    ansi_return = "\033[F" * num_newlines + common.ansi("3G")
+    print(f"{common.prompt_style(common.CHEVRON)} {common.wrap_style(initial_prompt[2:], '38;5;245m')}{ansi_return}", end="", flush=True)
+
+
 # Print prompt and load/print history before importing any other modules to hide startup delay of slower imports.
 # This makes a huge difference in perceived responsiveness when launching the interactive CLI.
-args = common.parse_args()
+if __name__ == "__main__":
+    if not os.isatty(0):
+        print(f"chat.py should only be run in interactive mode. Use prompt.py otherwise.")
+        exit(1)
 
-history = []
-if args.session and os.path.exists(args.session):
-    try:
-        with open(args.session, "r") as f:
-            history = json.load(f)
-            print(history_to_string(history, pretty=True))
-    except json.JSONDecodeError:
-        print(f"Error: Could not parse session file {args.session}. Starting new session.")
+    args = common.parse_args()
+    history = load_history(args.session) if args.session else []
+    if history:
+        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
 
-HELP_TEXT = common.wrap_style("Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline.", "38;5;245m")
-print(f"{common.prompt_style(common.CHEVRON)} {HELP_TEXT}{common.ansi('3G')}", end="", flush=True)
+    HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
+    print_decoy_prompt()
+
 
 import asyncio
 import datetime
-import sys
 
 from io import StringIO
 
 from prompt import stream_response, TokenCounter
 
-from prompt_toolkit import PromptSession, print_formatted_text, ANSI, HTML
+from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -57,7 +79,7 @@ def create_prompt_key_bindings():
 
 
 async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
-    print(common.ansi('1G'), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
+    print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
         user_input = await prompt_session.prompt_async(
@@ -66,7 +88,8 @@ async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession,
             vi_mode=True,
             cursor=ModalCursorShapeConfig(),
             multiline=True,
-            placeholder=ANSI(HELP_TEXT),
+            wrap_lines=True,
+            placeholder=ANSI(common.wrap_style(HELP_TEXT, "38;5;245m")),
             key_bindings=key_bindings,
         )
 
@@ -93,12 +116,6 @@ async def async_main():
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    args = common.parse_args()
-
-    if not sys.stdin.isatty():
-        print(f"{sys.argv[0]} should only be run in interactive mode. Use prompt.py otherwise.")
-        return
-
     # Get user input from arguments or stdin
     user_input = ""
     if args.input:
@@ -143,11 +160,12 @@ async def async_main():
         term_width = os.get_terminal_size().columns
         term_height = os.get_terminal_size().lines
 
-        # Print the last term_height - 1 lines of the history to avoid terminal problems
-        current_message = history_to_string(messages, pretty=True, wrap_width=term_width - 1)
+        current_message = history_to_string(messages, pretty=True, wrap_width=term_width)
+
         lines = current_message.split("\n")
 
         if limit_to_terminal_height:
+            # Print the last term_height - 1 lines of the history to avoid terminal problems
             if len(lines) >= term_height:
                 lines = lines[-(term_height - 1) :]
 

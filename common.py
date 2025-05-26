@@ -173,8 +173,45 @@ def word_wrap(text: str, wrap_width: int | None) -> str:
 
     return "\n".join(lines)
 
+def char_wrap(text: str, wrap_width: int | None) -> str:
+    """
+    Wrap text by characters instead of words, preserving indentation.
+    """
+    if not text or wrap_width is None or wrap_width <= 0:
+        return text
 
-def bat_syntax_highlight(string: str, language: str, wrap_width: int | None = None) -> str:
+    lines = []
+
+    for line in text.split("\n"):
+        # Preserve empty lines
+        if not line.strip():
+            lines.append(line)
+            continue
+
+        # Detect indentation of the original line
+        stripped_line = line.lstrip()
+        indent = line[: len(line) - len(stripped_line)]
+
+        # If the line fits within wrap_width, keep it as is
+        if len(line) <= wrap_width:
+            lines.append(line)
+            continue
+
+        # Wrap the line by characters while preserving indentation
+        current_line = []
+        for i in range(0, len(stripped_line), wrap_width):
+            chunk = stripped_line[i:i + wrap_width]
+            if current_line:
+                lines.append(indent + " ".join(current_line))
+                current_line = []
+            current_line.append(chunk)
+
+        if current_line:
+            lines.append(indent + " ".join(current_line))
+
+    return "\n".join(lines)
+
+def bat_syntax_highlight(string: str, language: str) -> str:
     """
     Turn string pretty by piping it through bat
     """
@@ -182,8 +219,6 @@ def bat_syntax_highlight(string: str, language: str, wrap_width: int | None = No
         import subprocess
 
         command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
-        if wrap_width is not None:
-            command.extend(["--wrap=character", f"--terminal-width={wrap_width}"])
 
         # Use bat to pretty print the string
         process = subprocess.Popen(

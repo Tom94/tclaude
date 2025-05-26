@@ -28,8 +28,6 @@ VERTEX_API_KEY = os.getenv("VERTEX_API_KEY")
 VERTEX_API_URL = "https://api.vertex.ai/v1/messages"
 VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
 
-IS_ATTY = sys.stdout.isatty()
-
 
 def get_available_tools() -> dict:
     """

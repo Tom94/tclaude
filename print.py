@@ -124,33 +124,30 @@ def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: boo
     else:
         title = f"Unknown tool `{name}`"
 
-    call_wrap_width = wrap_width
+    language = None
+
     if name == "web_search":
         query = tool_use.get("input", {}).get("query", "<unknown>")
         title = "Web search"
         text = f"Query: {query}"
     elif name == "code_execution":
         # It's always Python, see https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
-        python_code = common.word_wrap(
-            tool_use.get("input", {}).get("code", "<unknown>"),
-            wrap_width - 2 if wrap_width is not None else None,
-        )
-
-        if pretty:
-            python_code = common.bat_syntax_highlight(python_code, "python")
-            call_wrap_width = None  # pretty printing messes up wrap logic
-
+        language = "python"
+        text = tool_use.get("input", {}).get("code", "<unknown>")
         title = "Code execution"
-        text = python_code
     else:
+        language = "json"
         text = json.dumps(tool_use.get("input", {}), indent=2, sort_keys=True)
-        if pretty:
-            text = common.bat_syntax_highlight(text, "json", wrap_width=wrap_width)
-            call_wrap_width = None  # pretty printing messes up wrap logic
         title = f"Server tool `{name}`"
 
+    # The -2 accounts for the "╭─" and "╰─" indentation
+    text = common.word_wrap(text, wrap_width - 2 if wrap_width is not None else None)
+
+    if pretty and language:
+        text = common.bat_syntax_highlight(text, language)
+
     title, text, tool_result = check_tool_result(title, text, tool_use.get("id", ""))
-    write_call_block(title, text, io, pretty, call_wrap_width)
+    write_call_block(title, text, io, pretty, wrap_width=None)  # We already wrapped prior to syntax highlighting
     if tool_result is not None:
         write_tool_result(tool_use, tool_result, io, pretty, wrap_width)
 
@@ -222,9 +219,9 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
                 text_io.write(f"{to_superscript(','.join(sorted(superscripts)))}")
                 i += 1
 
-            text = text_io.getvalue()
+            text = common.word_wrap(text_io.getvalue(), wrap_width)
             if pretty:
-                text = common.bat_syntax_highlight(text, "md", wrap_width=wrap_width)
+                text = common.bat_syntax_highlight(text, "md")
 
             io.write(text.strip())
             i -= 1  # Adjust for the outer loop increment
@@ -294,8 +291,8 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        if sys.stdout.isatty():
-            wrap_width = os.get_terminal_size().columns - 1
+        if os.isatty(0):
+            wrap_width = os.get_terminal_size().columns
         else:
             wrap_width = None
 

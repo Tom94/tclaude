@@ -71,22 +71,25 @@ def default_sessions_dir() -> str:
     return "."
 
 
-def load_session_if_exists(path: str, sessions_dir: str) -> list[dict]:
+def load_session_if_exists(session_name: str, sessions_dir: str) -> list[dict]:
     import json
 
-    if not os.path.isfile(path):
-        candidate = os.path.join(sessions_dir, path)
+    if not session_name.lower().endswith(".json"):
+        session_name += ".json"
+
+    if not os.path.isfile(session_name):
+        candidate = os.path.join(sessions_dir, session_name)
         if os.path.isfile(candidate):
-            path = candidate
+            session_name = candidate
         else:
             return []
 
     history = []
     try:
-        with open(path, "r") as f:
+        with open(session_name, "r") as f:
             history = json.load(f)
     except json.JSONDecodeError:
-        print(f"Error: Could not parse session file {path}. Starting new session.")
+        print(f"Error: Could not parse session file {session_name}. Starting new session.")
 
     return history
 

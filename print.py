@@ -41,6 +41,10 @@ def write_result_block(heading: str, block_text: str, io: StringIO, pretty: bool
     write_block(heading, block_text, io, pretty, color="0;36m", wrap_width=wrap_width)
 
 
+def write_error_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
+    write_block(heading, block_text, io, pretty, color="0;91m", wrap_width=wrap_width)
+
+
 def format_python_code(code: str) -> str:
     lines = code.splitlines()
     formatted_lines = []
@@ -72,6 +76,11 @@ def gather_tool_results(messages: list[dict]) -> dict:
 
 def write_tool_result(tool_use: dict, tool_result: dict, io: StringIO, pretty: bool, wrap_width: int):
     tool_name = tool_use.get("name", "<unknown>")
+
+    if tool_result.get("is_error"):
+        error_message = tool_result.get("error", "<unknown>")
+        write_error_block(f"Error", error_message, io, pretty, wrap_width)
+        return
 
     if tool_name == "fetch_url":
         text = tool_result.get("content", "")
@@ -107,13 +116,12 @@ def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: boo
     def check_tool_result(title: str, text: str, tool_id: str) -> tuple[str, str, Optional[dict]]:
         tool_result = tool_results.get(tool_id)
         if tool_result is None:
-            title += f" (running)"
+            title += f" {common.spinner()}"
         else:
-            is_error = tool_result.get("is_error")
-            if is_error:
-                title += f" (error)"
+            if tool_result.get("is_error"):
+                title += f" ✗"
             else:
-                title += f" (done)"
+                title += f" ✓"
         return title, text, tool_result
 
     name = tool_use.get("name")

@@ -263,6 +263,7 @@ async def stream_response(
     thinking_budget: Optional[int] = None,
     write_cache: bool = False,
     on_response_update: Optional[Callable[[list[dict], TokenCounter], None]] = None,
+    update_interval: Optional[float] = None,
 ) -> tuple[list[dict], TokenCounter, bool]:
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.
@@ -351,104 +352,123 @@ async def stream_response(
 
     tool_use_json = {}
     messages = []
-
     tokens = TokenCounter()
-    async for data in stream_events(url, headers, params):
-        kind = data.get("type", "")
 
-        if "message" in kind:
-            # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
-            if kind == "message_start":
-                messages.append(data.get("message", {}))
-                messages[-1]["role"] = "assistant"
-                messages[-1]["content"] = []
-                tool_use_json = {}  # TODO: handle this more gracefully
+    async def animate_response():
+        while True:
+            assert on_response_update is not None, "on_response_update callback must be provided for animation"
+            assert update_interval is not None, "update_interval must be provided for animation"
+            on_response_update(messages, tokens)
+            await asyncio.sleep(update_interval)
 
-            elif kind == "message_delta":
-                delta = data.get("delta", {})
-                stop_reason = delta.get("stop_reason")
-                if stop_reason is not None:
-                    messages[-1]["stop_reason"] = stop_reason
+    animate_task = None
+    if on_response_update is not None and update_interval is not None:
+        animate_task = asyncio.create_task(animate_response())
 
-                usage = data.get("usage")
-                if usage:
-                    turn_tokens = TokenCounter(
-                        cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
-                        cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
-                        input_tokens=usage.get("input_tokens", 0),
-                        output_tokens=usage.get("output_tokens", 0),
-                    )
+    try:
+        async for data in stream_events(url, headers, params):
+            kind = data.get("type", "")
 
-                    tokens += turn_tokens
+            if "message" in kind:
+                # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
+                if kind == "message_start":
+                    messages.append(data.get("message", {}))
+                    messages[-1]["role"] = "assistant"
+                    messages[-1]["content"] = []
+                    tool_use_json = {}  # TODO: handle this more gracefully
 
-            elif kind == "message_end":
+                elif kind == "message_delta":
+                    delta = data.get("delta", {})
+                    stop_reason = delta.get("stop_reason")
+                    if stop_reason is not None:
+                        messages[-1]["stop_reason"] = stop_reason
+
+                    usage = data.get("usage")
+                    if usage:
+                        turn_tokens = TokenCounter(
+                            cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
+                            cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
+                            input_tokens=usage.get("input_tokens", 0),
+                            output_tokens=usage.get("output_tokens", 0),
+                        )
+
+                        tokens += turn_tokens
+
+                elif kind == "message_end":
+                    continue
+
                 continue
 
-            continue
+            if not messages:
+                raise ValueError("Content block before message in the response")
 
-        if not messages:
-            raise ValueError("Content block before message in the response")
+            content = messages[-1]["content"]
+            if kind == "content_block_start":
+                index = data.get("index", 0)
+                content_block = data.get("content_block", {})
 
-        content = messages[-1]["content"]
-        if kind == "content_block_start":
-            index = data.get("index", 0)
-            content_block = data.get("content_block", {})
+                if index >= len(content):
+                    content.extend([None] * (index - len(content) + 1))
 
-            if index >= len(content):
-                content.extend([None] * (index - len(content) + 1))
+                content[index] = content_block
 
-            content[index] = content_block
+            elif kind == "content_block_delta":
+                index = data.get("index", 0)
 
-        elif kind == "content_block_delta":
-            index = data.get("index", 0)
+                if index >= len(content):
+                    raise ValueError(f"Index {index} out of range for content list")
 
-            if index >= len(content):
-                raise ValueError(f"Index {index} out of range for content list")
+                delta = data.get("delta", {})
+                delta_type = delta.get("type")
 
-            delta = data.get("delta", {})
-            delta_type = delta.get("type")
+                if delta_type == "thinking_delta":
+                    thinking_delta = delta.get("thinking", "")
+                    if "thinking" not in content[index]:
+                        content[index]["thinking"] = ""
+                    content[index]["thinking"] += thinking_delta
 
-            if delta_type == "thinking_delta":
-                thinking_delta = delta.get("thinking", "")
-                if "thinking" not in content[index]:
-                    content[index]["thinking"] = ""
-                content[index]["thinking"] += thinking_delta
+                if delta_type == "signature_delta":
+                    signature_delta = delta.get("signature", "")
+                    if "thinking" not in content[index]:
+                        content[index]["signature"] = ""
+                    content[index]["signature"] += signature_delta
 
-            if delta_type == "signature_delta":
-                signature_delta = delta.get("signature", "")
-                if "thinking" not in content[index]:
-                    content[index]["signature"] = ""
-                content[index]["signature"] += signature_delta
+                elif delta_type == "text_delta":
+                    text = delta.get("text", "")
+                    if "text" not in content[index]:
+                        content[index]["text"] = ""
+                    content[index]["text"] += text
 
-            elif delta_type == "text_delta":
-                text = delta.get("text", "")
-                if "text" not in content[index]:
-                    content[index]["text"] = ""
-                content[index]["text"] += text
+                elif delta_type == "citations_delta":
+                    citation = delta.get("citation", {})
+                    if "citations" not in content[index]:
+                        content[index]["citations"] = []
+                    content[index]["citations"].append(citation)
 
-            elif delta_type == "citations_delta":
-                citation = delta.get("citation", {})
-                if "citations" not in content[index]:
-                    content[index]["citations"] = []
-                content[index]["citations"].append(citation)
+                elif delta_type == "input_json_delta":
+                    partial_json = delta.get("partial_json", "")
 
-            elif delta_type == "input_json_delta":
-                partial_json = delta.get("partial_json", "")
+                    if index not in tool_use_json:
+                        tool_use_json[index] = StringIO()
 
-                if index not in tool_use_json:
-                    tool_use_json[index] = StringIO()
+                    tuj = tool_use_json[index]
+                    tuj.write(partial_json)
 
-                tuj = tool_use_json[index]
-                tuj.write(partial_json)
+                    if tuj.tell() > 0:
+                        try:
+                            content[index]["input"] = partial_loads(tuj.getvalue())
+                        except:
+                            pass
 
-                if tuj.tell() > 0:
-                    try:
-                        content[index]["input"] = partial_loads(tuj.getvalue())
-                    except:
-                        pass
-
-        if on_response_update is not None:
-            on_response_update(messages, tokens)
+            if on_response_update is not None:
+                on_response_update(messages, tokens)
+    finally:
+        if animate_task is not None:
+            animate_task.cancel()
+            try:
+                await animate_task
+            except asyncio.CancelledError:
+                pass
 
     stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
     if stop_reason == "pause_turn":

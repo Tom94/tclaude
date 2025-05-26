@@ -51,6 +51,7 @@ async def user_prompt(
     user_input = ""
     while not user_input:
         with patch_stdout():
+
             async def animate_prompts():
                 while True:
                     await asyncio.sleep(1 / SPINNER_FPS)
@@ -139,8 +140,11 @@ async def async_main(args, history: list[dict]):
         nonlocal num_newlines_printed
 
         to_print = StringIO()
-        to_print.write("\033[F" * num_newlines_printed)
-        to_print.write("\r")
+
+        # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
+        if num_newlines_printed > 0:
+            to_print.write(f"\033[{num_newlines_printed}F")
+        to_print.write("\r\033[J")
 
         term_width = os.get_terminal_size().columns
         term_height = os.get_terminal_size().lines
@@ -154,10 +158,13 @@ async def async_main(args, history: list[dict]):
             if len(lines) >= term_height:
                 lines = lines[-(term_height - 1) :]
 
-        for line in lines:
-            to_print.write(f"\033[K{line}\n")
+        to_print.write("\n".join(lines))
 
-        print(to_print.getvalue().rstrip(), end="", flush=True)
+        # Print a spinner if the response is still being built
+        if len(lines) == 1 and lines[0] == "":
+            to_print.write(f"{common.spinner()} ")
+
+        print(to_print.getvalue(), end="", flush=True)
         num_newlines_printed = len(lines) - 1
 
     async def handle_autoname_result(autoname_task: asyncio.Task) -> str:
@@ -183,38 +190,38 @@ async def async_main(args, history: list[dict]):
         date = datetime.datetime.now().strftime("%Y-%m-%d")
         return f"{date}-{session_name}.json"
 
-    is_user_turn = True
     autoname_task = None
+
+    async def lprompt() -> str:
+        return f"{common.CHEVRON} "
+
+    async def rprompt() -> str:
+        nonlocal autoname_task, session_name
+
+        rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
+        if args.role:
+            prompt_role = os.path.splitext(os.path.basename(args.role))[0]
+            rprompt = f"󱜙 {prompt_role}  {rprompt}"
+
+        if session_name is None and autoname_task is not None:
+            if autoname_task.done():
+                session_name = await handle_autoname_result(autoname_task)
+                autoname_task = None
+            else:
+                rprompt = f" auto-naming {common.spinner()}  {rprompt}"
+
+        if session_name is not None:
+            rprompt = f" {session_name}  {rprompt}"
+
+        return rprompt
+
+    is_user_turn = True
     try:
         while True:
             num_newlines_printed = 0
 
             if is_user_turn:
                 if not user_input:
-
-                    async def lprompt() -> str:
-                        return f"{common.CHEVRON} "
-
-                    async def rprompt() -> str:
-                        nonlocal autoname_task, session_name
-
-                        rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
-                        if args.role:
-                            prompt_role = os.path.splitext(os.path.basename(args.role))[0]
-                            rprompt = f"󱜙 {prompt_role}  {rprompt}"
-
-                        if session_name is None and autoname_task is not None:
-                            if autoname_task.done():
-                                session_name = await handle_autoname_result(autoname_task)
-                                autoname_task = None
-                            else:
-                                rprompt = f" auto-naming {common.spinner()}  {rprompt}"
-
-                        if session_name is not None:
-                            rprompt = f" {session_name}  {rprompt}"
-
-                        return rprompt
-
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 else:
                     prompt_session.history.append_string(user_input)
@@ -245,6 +252,7 @@ async def async_main(args, history: list[dict]):
                     thinking_budget=args.thinking_budget,
                     write_cache=write_cache,
                     on_response_update=reprint_current_response,
+                    update_interval=1 / SPINNER_FPS,
                 )
 
                 is_user_turn = not call_again

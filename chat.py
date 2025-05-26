@@ -184,11 +184,11 @@ async def async_main(args, history: list[dict]):
             print(f"Falling back to time stamp.")
             session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
-        session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
+        session_name = session_name.lower().replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
         session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
 
         date = datetime.datetime.now().strftime("%Y-%m-%d")
-        return f"{date}-{session_name}.json"
+        return f"{date}-{session_name}"
 
     autoname_task = None
 

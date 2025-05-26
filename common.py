@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-import os
-
 import argparse
+import os
 
 
 CHEVRON = ""
@@ -118,7 +117,7 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def word_wrap(text: str, wrap_width: int | None) -> str:
+def word_wrap(text: str, wrap_width: int) -> str:
     if not text or wrap_width is None or wrap_width <= 0:
         return text
 
@@ -173,7 +172,8 @@ def word_wrap(text: str, wrap_width: int | None) -> str:
 
     return "\n".join(lines)
 
-def char_wrap(text: str, wrap_width: int | None) -> str:
+
+def char_wrap(text: str, wrap_width: int) -> str:
     """
     Wrap text by characters instead of words, preserving indentation.
     """
@@ -200,7 +200,7 @@ def char_wrap(text: str, wrap_width: int | None) -> str:
         # Wrap the line by characters while preserving indentation
         current_line = []
         for i in range(0, len(stripped_line), wrap_width):
-            chunk = stripped_line[i:i + wrap_width]
+            chunk = stripped_line[i : i + wrap_width]
             if current_line:
                 lines.append(indent + " ".join(current_line))
                 current_line = []
@@ -210,6 +210,7 @@ def char_wrap(text: str, wrap_width: int | None) -> str:
             lines.append(indent + " ".join(current_line))
 
     return "\n".join(lines)
+
 
 def bat_syntax_highlight(string: str, language: str) -> str:
     """

@@ -7,7 +7,7 @@ import requests
 import subprocess
 import inspect
 import importlib
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Optional
 
 from io import StringIO
 from partial_json_parser import loads as partial_loads
@@ -263,11 +263,11 @@ def stream_response(
     max_tokens: int = 16384,
     enable_web_search: bool = True,
     enable_code_exec: bool = True,
-    system_prompt: str | None = None,
+    system_prompt: Optional[str] = None,
     enable_thinking: bool = False,
-    thinking_budget: int | None = None,
+    thinking_budget: Optional[int] = None,
     write_cache: bool = False,
-    on_response_update: Callable[[list[dict], TokenCounter], None] | None = None,
+    on_response_update: Optional[Callable[[list[dict], TokenCounter], None]] = None,
 ) -> tuple[list[dict], TokenCounter, bool]:
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.

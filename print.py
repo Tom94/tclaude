@@ -3,15 +3,15 @@
 import argparse
 import json
 import os
-import sys
 
 from io import StringIO
+from typing import Optional, Union
 
 import common
 from common import wrap_style
 
 
-def to_superscript(text: str | int) -> str:
+def to_superscript(text: Union[str, int]) -> str:
     if isinstance(text, int):
         text = str(text)
     superscript_map = str.maketrans("0123456789+-=(),", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒")
@@ -25,19 +25,19 @@ def write_system_message(message: dict, io: StringIO):
             io.write(f"{content_block.text}\n")
 
 
-def write_block(heading: str, block_text: str, io: StringIO, pretty: bool, color: str, wrap_width: int | None):
+def write_block(heading: str, block_text: str, io: StringIO, pretty: bool, color: str, wrap_width: int):
     io.write(wrap_style(f"╭── {heading}\n", color, pretty=pretty))
-    block_text = common.word_wrap(block_text, wrap_width - 2 if wrap_width is not None else None)
+    block_text = common.word_wrap(block_text, wrap_width - 2)
     for line in block_text.splitlines():
         io.write(f"{wrap_style('│ ', color, pretty=pretty)}{line}\n")
     io.write(wrap_style("╰─", color, pretty=pretty))
 
 
-def write_call_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int | None):
+def write_call_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
     write_block(heading, block_text, io, pretty, color="0;35m", wrap_width=wrap_width)
 
 
-def write_result_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int | None):
+def write_result_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
     write_block(heading, block_text, io, pretty, color="0;36m", wrap_width=wrap_width)
 
 
@@ -70,11 +70,13 @@ def gather_tool_results(messages: list[dict]) -> dict:
     return result
 
 
-def write_tool_result(tool_use: dict, tool_result: dict, io: StringIO, pretty: bool, wrap_width: int | None):
+def write_tool_result(tool_use: dict, tool_result: dict, io: StringIO, pretty: bool, wrap_width: int):
     tool_name = tool_use.get("name", "<unknown>")
 
     if tool_name == "fetch_url":
-        result_text = f"Fetched HTML and converted it to {tool_result.get('content', '').count('\n')} lines of markdown text."
+        text = tool_result.get("content", "")
+        num_lines = text.count("\n") + 1
+        result_text = f"Fetched HTML and converted it to {num_lines} lines of markdown text."
     elif tool_name == "web_search":
         results = tool_result.get("content", [])
         result_text = f"Found {len(results)} references. See citations below."
@@ -101,8 +103,8 @@ def write_tool_result(tool_use: dict, tool_result: dict, io: StringIO, pretty: b
     write_result_block("Result", result_text, io, pretty, wrap_width)
 
 
-def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: bool, wrap_width: int | None):
-    def check_tool_result(title: str, text: str, tool_id: str) -> tuple[str, str, dict | None]:
+def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: bool, wrap_width: int):
+    def check_tool_result(title: str, text: str, tool_id: str) -> tuple[str, str, Optional[dict]]:
         tool_result = tool_results.get(tool_id)
         if tool_result is None:
             title += f" (running)"
@@ -141,18 +143,18 @@ def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: boo
         title = f"Server tool `{name}`"
 
     # The -2 accounts for the "╭─" and "╰─" indentation
-    text = common.word_wrap(text, wrap_width - 2 if wrap_width is not None else None)
+    text = common.word_wrap(text, wrap_width - 2)
 
     if pretty and language:
         text = common.bat_syntax_highlight(text, language)
 
     title, text, tool_result = check_tool_result(title, text, tool_use.get("id", ""))
-    write_call_block(title, text, io, pretty, wrap_width=None)  # We already wrapped prior to syntax highlighting
+    write_call_block(title, text, io, pretty, wrap_width=0)  # We already wrapped prior to syntax highlighting
     if tool_result is not None:
         write_tool_result(tool_use, tool_result, io, pretty, wrap_width)
 
 
-def write_user_message(message: dict, io: StringIO, pretty: bool, wrap_width: int | None):
+def write_user_message(message: dict, io: StringIO, pretty: bool, wrap_width: int):
     prompt = f"{common.CHEVRON} "
 
     for content_block in message.get("content", []):
@@ -172,7 +174,7 @@ def write_user_message(message: dict, io: StringIO, pretty: bool, wrap_width: in
             io.write("\n\n")
 
 
-def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pretty: bool, wrap_width: int | None):
+def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pretty: bool, wrap_width: int):
     references = {}
 
     content_blocks = message.get("content", [])
@@ -252,7 +254,7 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
             io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
-def history_to_string(history: list[dict], pretty: bool, wrap_width: int | None = None) -> str:
+def history_to_string(history: list[dict], pretty: bool, wrap_width: int) -> str:
     tool_results = gather_tool_results(history)
 
     io = StringIO()
@@ -291,10 +293,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        if os.isatty(0):
-            wrap_width = os.get_terminal_size().columns
-        else:
-            wrap_width = None
+        wrap_width = os.get_terminal_size().columns if os.isatty(0) else 0
 
         result = history_to_string(history, pretty=args.pretty, wrap_width=wrap_width)
         print(result, end="", flush=True)

@@ -27,6 +27,7 @@
         taiProject = pythonPackages.buildPythonPackage rec {
           pname = "tai";
           version = "0.1.0";
+          format = "pyproject";
           src = ./.;
 
           propagatedBuildInputs = pythonDeps;
@@ -37,7 +38,6 @@
             wheel
           ];
 
-          # # Optional: run tests
           # checkInputs = with pythonPackages; [
           #   pytest
           # ];
@@ -78,11 +78,6 @@
             source .venv/bin/activate
             pip install -e .
           '';
-        };
-
-        # Optional: separate shells for different purposes
-        devShells.minimal = pkgs.mkShell {
-          buildInputs = [ python ] ++ pythonDeps;
         };
       });
 }

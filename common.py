@@ -2,12 +2,30 @@
 
 import argparse
 import os
+import time
 
 from typing import Optional
 
 
 CHEVRON = ""
 HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
+
+SPINNER_FPS = 10  # Frames per second for spinner animation
+
+
+def spinner() -> str:
+    """
+    Return a spinner frame based on the index.
+    """
+    frames = [
+        "⠲",
+        "⠴",
+        "⠦",
+        "⠖",
+    ]
+    # frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
+    sidx = int(time.perf_counter() * SPINNER_FPS)
+    return frames[sidx % len(frames)]
 
 
 def ansi(cmd: str) -> str:

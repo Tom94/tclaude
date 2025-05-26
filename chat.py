@@ -11,9 +11,12 @@ from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
+from typing import Callable, Coroutine, Any
 
 from print import history_to_string
 from prompt import stream_response, TokenCounter
+
+SPINNER_FPS = 10
 
 
 def create_prompt_key_bindings():
@@ -38,21 +41,40 @@ def create_prompt_key_bindings():
     return bindings
 
 
-async def user_prompt(lprompt: str, rprompt: str, prompt_session: PromptSession, key_bindings: KeyBindings) -> str:
+async def user_prompt(
+    lprompt: Callable[[], Coroutine[Any, Any, str]],
+    rprompt: Callable[[], Coroutine[Any, Any, str]],
+    prompt_session: PromptSession,
+    key_bindings: KeyBindings,
+) -> str:
     print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
         with patch_stdout():
-            user_input = await prompt_session.prompt_async(
-                ANSI(common.prompt_style(lprompt)),
-                rprompt=ANSI(common.prompt_style(rprompt)),
-                vi_mode=True,
-                cursor=ModalCursorShapeConfig(),
-                multiline=True,
-                wrap_lines=True,
-                placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
-                key_bindings=key_bindings,
+
+            prompt_task = asyncio.create_task(
+                prompt_session.prompt_async(
+                    ANSI(common.prompt_style(await lprompt())),
+                    rprompt=ANSI(common.prompt_style(await rprompt())),
+                    vi_mode=True,
+                    cursor=ModalCursorShapeConfig(),
+                    multiline=True,
+                    wrap_lines=True,
+                    placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
+                    key_bindings=key_bindings,
+                    refresh_interval=1 / SPINNER_FPS,
+                )
             )
+
+            while not prompt_task.done():
+                try:
+                    await asyncio.sleep(0.01)
+                    prompt_session.message = ANSI(common.prompt_style(await lprompt()))
+                    prompt_session.rprompt = ANSI(common.prompt_style(await rprompt()))
+                except asyncio.CancelledError:
+                    break
+
+            user_input = await prompt_task
 
     return user_input.strip()
 
@@ -166,13 +188,29 @@ async def async_main(args, history: list[dict]):
 
             if is_user_turn:
                 if not user_input:
-                    lprompt = f"{common.CHEVRON} "
-                    rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
-                    if args.role:
-                        prompt_role = os.path.splitext(os.path.basename(args.role))[0]
-                        rprompt = f"󱜙 {prompt_role}  {rprompt}"
-                    if session_name:
-                        rprompt = f" {session_name}  {rprompt}"
+
+                    async def lprompt() -> str:
+                        return f"{common.CHEVRON} "
+
+                    async def rprompt() -> str:
+                        nonlocal autoname_task, session_name
+
+                        rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
+                        if args.role:
+                            prompt_role = os.path.splitext(os.path.basename(args.role))[0]
+                            rprompt = f"󱜙 {prompt_role}  {rprompt}"
+
+                        if session_name is None and autoname_task is not None:
+                            if autoname_task.done():
+                                session_name = await handle_autoname_result(autoname_task)
+                                autoname_task = None
+                            else:
+                                rprompt = f" auto-naming {common.spinner()}  {rprompt}"
+
+                        if session_name is not None:
+                            rprompt = f" {session_name}  {rprompt}"
+
+                        return rprompt
 
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 else:
@@ -240,7 +278,6 @@ async def async_main(args, history: list[dict]):
             # Start a background task to auto-name the session if it is not already named
             if session_name is None:
                 if autoname_task is None and is_user_turn:
-                    print(common.gray_style("Auto-naming session in the background...\n"))
                     autoname_prompt = (
                         "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
                     )
@@ -256,9 +293,6 @@ async def async_main(args, history: list[dict]):
                             enable_thinking=False,
                         )
                     )
-
-                if autoname_task is not None and autoname_task.done():
-                    session_name = await handle_autoname_result(autoname_task)
 
     except KeyboardInterrupt:
         pass

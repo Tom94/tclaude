@@ -54,7 +54,7 @@ def main():
 
     bin_name = "tai"
 
-    builder = PyInstallerBuilder("chat.py", bin_name)
+    builder = PyInstallerBuilder("tai.py", bin_name)
     builder.clean()
     success = builder.build(icon=args.icon)
 

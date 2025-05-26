@@ -23,7 +23,8 @@ def main():
     print_decoy_prompt()
 
     import chat
-    chat.main(args, history)
+
+    chat.main_with_args_and_history(args, history)
 
 
 if __name__ == "__main__":

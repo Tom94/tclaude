@@ -323,15 +323,19 @@ async def async_main(args, history: list[dict]):
                 total_tokens.print_cost(args.model)
 
 
-def main(args, history: list[dict]):
+def main_with_args_and_history(args, history: list[dict]):
     asyncio.run(async_main(args, history))
 
 
-if __name__ == "__main__":
+def main():
     args = common.parse_args()
 
     history = common.load_session(args.session) if args.session else []
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
 
-    main(args, history)
+    main_with_args_and_history(args, history)
+
+
+if __name__ == "__main__":
+    main()

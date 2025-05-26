@@ -19,7 +19,7 @@ async def fetch_url(url: str) -> str:
     from bs4 import BeautifulSoup
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=5) as response:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(5)) as response:
             response.raise_for_status()
 
             soup = BeautifulSoup(await response.text(), "html.parser")

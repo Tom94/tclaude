@@ -18,7 +18,7 @@ def main():
     args = common.parse_args()
     history = common.load_session_if_exists(args.session, args.sessions_dir)
     if history:
-        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns))
+        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
 
     print_decoy_prompt()
 

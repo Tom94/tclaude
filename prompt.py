@@ -482,12 +482,7 @@ async def async_main():
     # Read system prompt from file if provided
     system_prompt = None
     if args.role:
-        try:
-            with open(args.role, "r") as f:
-                system_prompt = f.read().strip()
-        except Exception as e:
-            print(f"Error reading system prompt file: {e}")
-            return
+        system_prompt = common.load_system_prompt(args.role)
 
     # The response is already printed during streaming, so we don't need to print it again
     history = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]

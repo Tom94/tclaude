@@ -3,6 +3,8 @@
 import argparse
 import os
 
+from typing import Optional
+
 
 CHEVRON = ""
 HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
@@ -51,22 +53,34 @@ def default_sessions_dir() -> str:
     return "."
 
 
-def load_session(session) -> list[dict]:
+def load_session(path) -> list[dict]:
     import json
 
     history = []
-    if os.path.exists(session):
+    if os.path.exists(path):
         try:
-            with open(session, "r") as f:
+            with open(path, "r") as f:
                 history = json.load(f)
         except json.JSONDecodeError:
-            print(f"Error: Could not parse session file {session}. Starting new session.")
+            print(f"Error: Could not parse session file {path}. Starting new session.")
 
     return history
 
 
+def load_system_prompt(path: str) -> Optional[str]:
+    system_prompt = None
+    try:
+        with open(path, "r") as f:
+            system_prompt = f.read().strip()
+    except Exception as e:
+        print(f"Error reading system prompt file: {e}")
+    return system_prompt
+
+
 def parse_args():
     default_role = os.path.join(get_config_dir(), "roles", "default.md")
+    if not os.path.isfile(default_role):
+        default_role = None
 
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     parser.add_argument("input", nargs="*", help="Input text to send to Claude")

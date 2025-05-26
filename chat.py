@@ -83,12 +83,7 @@ async def async_main(args, history: list[dict]):
     # Read system prompt from file if provided
     system_prompt = None
     if args.role:
-        try:
-            with open(args.role, "r") as f:
-                system_prompt = f.read().strip()
-        except Exception as e:
-            print(f"Error reading system prompt file: {e}")
-            return
+        system_prompt = common.load_system_prompt(args.role)
 
     initial_history_length = len(history)
 

@@ -147,7 +147,7 @@ async def user_prompt(
 
             user_input = user_input.strip()
 
-    return user_input.strip()
+    return user_input
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -324,7 +324,8 @@ async def async_main(args, history: list[dict]):
                         print("Falling back to time stamp.")
                         session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
-                    session_name = session_name.lower().replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
+                    session_name = session_name.strip().lower()
+                    session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
                     session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
 
                     date = datetime.datetime.now().strftime("%Y-%m-%d")

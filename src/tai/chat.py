@@ -21,7 +21,7 @@ import datetime
 import json
 import os
 
-from io import StringIO
+from dataclasses import dataclass, field
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
@@ -155,60 +155,9 @@ async def async_main(args, history: list[dict]):
     write_cache = False
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-    num_newlines_printed = 0
-
-    def reprint_current_response(messages: list[dict], _: TokenCounter, limit_to_terminal_height: bool = True):
-        nonlocal num_newlines_printed
-
-        to_print = StringIO()
-
-        # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
-        if num_newlines_printed > 0:
-            to_print.write(f"\033[{num_newlines_printed}F")
-        to_print.write("\r\033[J")
-
-        term_width = os.get_terminal_size().columns
-        term_height = os.get_terminal_size().lines
-
-        current_message = history_to_string(messages, pretty=True, wrap_width=term_width)
-
-        lines = current_message.split("\n")
-
-        if limit_to_terminal_height:
-            # Print the last term_height - 1 lines of the history to avoid terminal problems
-            if len(lines) >= term_height:
-                lines = lines[-(term_height - 1) :]
-
-        to_print.write("\n".join(lines))
-
-        # Print a spinner if the response is still being built
-        if len(lines) == 1 and lines[0] == "":
-            to_print.write(f"{common.spinner()} ")
-
-        print(to_print.getvalue(), end="", flush=True)
-        num_newlines_printed = len(lines) - 1
-
-    def handle_autoname_result(autoname_task: asyncio.Task):
-        nonlocal total_tokens, session_name
-
-        try:
-            messages, tokens, _ = autoname_task.result()
-            total_tokens += tokens
-            session_name = history_to_string(messages, pretty=False)
-            print("\r", end="", flush=True)
-        except KeyboardInterrupt or Exception as e:
-            if isinstance(e, KeyboardInterrupt):
-                print(f"Error auto-naming session: {e}")
-            else:
-                print("Auto-naming interrupted by user.")
-            print("Falling back to time stamp.")
-            session_name = datetime.datetime.now().strftime("%H-%M-%S")
-
-        session_name = session_name.lower().replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
-        session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
-
-        date = datetime.datetime.now().strftime("%Y-%m-%d")
-        session_name = f"{date}-{session_name}"
+    def history_or_spinner(messages: list[dict]):
+        current_message = history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns)
+        return current_message if current_message else f"{common.spinner()} "
 
     autoname_task = None
 
@@ -230,8 +179,6 @@ async def async_main(args, history: list[dict]):
 
     is_user_turn = True
     while True:
-        num_newlines_printed = 0
-
         if is_user_turn:
             if not user_input:
                 try:
@@ -248,40 +195,38 @@ async def async_main(args, history: list[dict]):
             # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
             pass
 
-        try:
-            # The response is already printed during streaming, so we don't need to print it again
-            messages, tokens, call_again = await stream_response(
-                model=args.model,
-                history=history,
-                max_tokens=args.max_tokens,
-                enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                system_prompt=system_prompt,
-                enable_thinking=args.thinking,
-                thinking_budget=args.thinking_budget,
-                write_cache=write_cache,
-                on_response_update=reprint_current_response,
-                update_interval=1 / SPINNER_FPS,
-            )
+        partial = {"messages": []}
+        async with common.live_print(lambda: history_or_spinner(partial["messages"]), transient=False):
+            try:
+                # The response is already printed during streaming, so we don't need to print it again
+                messages, tokens, call_again = await stream_response(
+                    model=args.model,
+                    history=history,
+                    max_tokens=args.max_tokens,
+                    enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                    enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                    system_prompt=system_prompt,
+                    enable_thinking=args.thinking,
+                    thinking_budget=args.thinking_budget,
+                    write_cache=write_cache,
+                    on_response_update=lambda m, _: partial.update({"messages": m}),
+                )
 
-            is_user_turn = not call_again
-        except (KeyboardInterrupt, Exception) as e:
-            if is_user_turn:
-                history.pop()
-            is_user_turn = True
+                is_user_turn = not call_again
+            except (KeyboardInterrupt, Exception) as e:
+                if is_user_turn:
+                    history.pop()
+                is_user_turn = True
 
-            if isinstance(e, KeyboardInterrupt):
-                print("\n\nResponse interrupted by user.\n")
-            else:
-                print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
+                if isinstance(e, KeyboardInterrupt):
+                    print("\n\nResponse interrupted by user.\n")
+                else:
+                    print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
 
-            continue
+                continue
 
         history.extend(messages)
         total_tokens += tokens
-
-        # Final print of the response that doesn't have a line limit (because we no longer have to overwrite it)
-        reprint_current_response(messages, tokens, limit_to_terminal_height=False)
 
         # Automatically determine whether we should put a cache breakpoint into the next prompt
         write_cache = should_cache(tokens, args.model)
@@ -311,6 +256,29 @@ async def async_main(args, history: list[dict]):
                         enable_thinking=False,
                     )
                 )
+
+                def handle_autoname_result(autoname_task: asyncio.Task):
+                    nonlocal total_tokens, session_name
+
+                    try:
+                        messages, tokens, _ = autoname_task.result()
+                        total_tokens += tokens
+                        session_name = history_to_string(messages, pretty=False)
+                        print("\r", end="", flush=True)
+                    except KeyboardInterrupt or Exception as e:
+                        if isinstance(e, KeyboardInterrupt):
+                            print(f"Error auto-naming session: {e}")
+                        else:
+                            print("Auto-naming interrupted by user.")
+                        print("Falling back to time stamp.")
+                        session_name = datetime.datetime.now().strftime("%H-%M-%S")
+
+                    session_name = session_name.lower().replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
+                    session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
+
+                    date = datetime.datetime.now().strftime("%Y-%m-%d")
+                    session_name = f"{date}-{session_name}"
+
                 autoname_task.add_done_callback(handle_autoname_result)
 
     print()
@@ -323,7 +291,8 @@ async def async_main(args, history: list[dict]):
         # 3. If the path does not exist, we prepend the sessions directory.
         # 4. We write the session file regardless of whether the final path exists or not.
         if autoname_task and not autoname_task.done():
-            await autoname_task
+            async with common.live_print(lambda: f"Auto-naming session {common.spinner()} "):
+                await autoname_task
 
         if session_name:
             session_path = session_name

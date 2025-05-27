@@ -219,7 +219,7 @@ def get_gcp_access_token() -> str:
 
 def get_endpoint_vertex(model: str) -> tuple[str, dict, dict]:
     if not VERTEX_API_PROJECT:
-        raise ValueError("VERTEX_API_PROJECT environment variables are required")
+        raise ValueError("VERTEX_API_PROJECT environment variable must be set")
 
     # Prepare headers
     headers = {
@@ -237,7 +237,7 @@ def get_endpoint_vertex(model: str) -> tuple[str, dict, dict]:
 
 def get_endpoint_anthropic(model: str) -> tuple[str, dict, dict]:
     if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+        raise ValueError("ANTHROPIC_API_KEY environment variable must be set")
 
     # Prepare headers
     headers = {

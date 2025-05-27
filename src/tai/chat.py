@@ -32,8 +32,6 @@ from . import common
 from .print import history_to_string
 from .prompt import stream_response, TokenCounter
 
-SPINNER_FPS = 10
-
 
 @contextlib.asynccontextmanager
 async def live_print(get_to_print: Callable[[], str], transient: bool = True):
@@ -73,7 +71,7 @@ async def live_print(get_to_print: Callable[[], str], transient: bool = True):
     async def live_print_task():
         while True:
             clear_and_print(final=False)
-            await asyncio.sleep(1.0 / SPINNER_FPS)
+            await asyncio.sleep(1.0 / common.SPINNER_FPS)
 
     task = asyncio.create_task(live_print_task())
     try:
@@ -124,7 +122,7 @@ async def user_prompt(
             async def animate_prompts():
                 try:
                     while True:
-                        await asyncio.sleep(1 / SPINNER_FPS)
+                        await asyncio.sleep(1 / common.SPINNER_FPS)
                         prompt_session.message = ANSI(common.prompt_style(lprompt()))
                         prompt_session.rprompt = ANSI(common.prompt_style(rprompt()))
                 except asyncio.CancelledError:
@@ -141,7 +139,7 @@ async def user_prompt(
                     wrap_lines=True,
                     placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
                     key_bindings=key_bindings,
-                    refresh_interval=1 / SPINNER_FPS,
+                    refresh_interval=1 / common.SPINNER_FPS,
                 )
             finally:
                 animate_task.cancel()

@@ -3,7 +3,7 @@ line-length = 140
 
 [project]
 name = "tai"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
 readme = "README.md"
@@ -24,4 +24,7 @@ tai = "tai.tai:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["tai*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "tai.__version__"}
 

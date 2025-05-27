@@ -23,10 +23,16 @@
           wcwidth
         ];
 
+        # Extract version from __init__.py
+        versionFromInit = builtins.head (
+          builtins.match ".*__version__ = \"([^\"]+)\".*"
+            (builtins.readFile ./src/tai/__init__.py)
+        );
+
         # Your package derivation
         taiProject = pythonPackages.buildPythonPackage rec {
           pname = "tai";
-          version = "0.1.0";
+          version = versionFromInit;
           format = "pyproject";
           src = ./.;
 

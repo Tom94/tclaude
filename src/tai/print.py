@@ -26,6 +26,20 @@ from typing import Optional, Union
 from . import common
 from .common import wrap_style
 
+def rstrip(io: StringIO) -> StringIO:
+    """
+    Remove trailing newlines and spaces from the StringIO object.
+    """
+    pos = io.tell()
+    while pos > 0:
+        io.seek(pos - 1)
+        if not io.read(1).isspace():
+            break
+        pos -= 1
+
+    io.seek(pos)
+    io.truncate()
+    return io
 
 def to_superscript(text: Union[str, int]) -> str:
     if isinstance(text, int):
@@ -245,11 +259,11 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
                 text_io.write(f"{to_superscript(','.join(sorted(superscripts)))}")
                 i += 1
 
-            text = common.word_wrap(text_io.getvalue(), wrap_width)
+            text = common.word_wrap(rstrip(text_io).getvalue(), wrap_width)
             if pretty:
                 text = common.bat_syntax_highlight(text, "md")
 
-            io.write(text.strip())
+            io.write(text)
             i -= 1  # Adjust for the outer loop increment
         elif block_type == "tool_use" or block_type == "server_tool_use":
             write_tool_use(content_block, tool_results, io, pretty, wrap_width)
@@ -290,7 +304,7 @@ def history_to_string(history: list[dict], pretty: bool, wrap_width: int = 0) ->
         elif message["role"] == "assistant":
             write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width)
 
-    return io.getvalue().strip()
+    return rstrip(io).getvalue()
 
 
 def print_decoy_prompt():

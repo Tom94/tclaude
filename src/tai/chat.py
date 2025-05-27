@@ -195,6 +195,9 @@ async def async_chat(args, history: list[dict], user_input: str):
             if text:
                 prompt_session.history.append_string(text)
 
+    if user_input:
+        prompt_session.history.append_string(user_input)
+
     total_tokens = TokenCounter()
 
     # Initially, don't cache anything. The system prompt is always cached.

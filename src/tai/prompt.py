@@ -39,10 +39,8 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
 # Anthropic API configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 VERTEX_API_KEY = os.getenv("VERTEX_API_KEY")
-VERTEX_API_URL = "https://api.vertex.ai/v1/messages"
 VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
 
 
@@ -151,8 +149,11 @@ async def use_tools(messages: list[dict]) -> dict:
                 if not isinstance(content, str):
                     content = str(content)  # Ensure content is a string
                 tool_result["content"] = content
-            except Exception as e:
-                tool_result["content"] = f"Error executing tool: {str(e)}"
+            except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
+                if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
+                    tool_result["content"] = "Tool execution was cancelled."
+                else:
+                    tool_result["content"] = f"Error executing tool: {str(e)}"
                 tool_result["is_error"] = True
 
     return {"role": "user", "content": tool_results}
@@ -247,7 +248,7 @@ def get_endpoint_anthropic(model: str) -> tuple[str, dict, dict]:
         "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14",
     }
 
-    url = ANTHROPIC_API_URL
+    url = "https://api.anthropic.com/v1/messages"
     params = {
         "model": model,
     }

@@ -21,7 +21,6 @@ import contextlib
 import datetime
 import json
 import os
-import sys
 
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
@@ -230,7 +229,7 @@ async def async_chat(args, history: list[dict], user_input: str):
             if not user_input:
                 try:
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
-                except (EOFError, KeyboardInterrupt):
+                except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
                     break
 
             history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
@@ -240,8 +239,8 @@ async def async_chat(args, history: list[dict], user_input: str):
             pass
 
         partial = {"messages": []}
-        async with live_print(lambda: history_or_spinner(partial["messages"]), transient=False):
-            try:
+        try:
+            async with live_print(lambda: history_or_spinner(partial["messages"]), transient=False):
                 # The response is already printed during streaming, so we don't need to print it again
                 messages, tokens, call_again = await stream_response(
                     model=args.model,
@@ -257,17 +256,17 @@ async def async_chat(args, history: list[dict], user_input: str):
                 )
 
                 is_user_turn = not call_again
-            except (KeyboardInterrupt, Exception) as e:
-                if is_user_turn:
-                    history.pop()
-                is_user_turn = True
+        except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
+            if is_user_turn:
+                history.pop()
+            is_user_turn = True
 
-                if isinstance(e, KeyboardInterrupt):
-                    print("\n\nResponse interrupted by user.\n")
-                else:
-                    print(f"\n\nUnexpected error: {e}\nPlease try again.\n")
+            if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
+                print("\n\nResponse cancelled.\n")
+            else:
+                print(f"\n\nUnexpected error: {e}. Please try again.\n")
 
-                continue
+            continue
 
         history.extend(messages)
         total_tokens += tokens
@@ -308,13 +307,12 @@ async def async_chat(args, history: list[dict], user_input: str):
                         messages, tokens, _ = autoname_task.result()
                         total_tokens += tokens
                         session_name = history_to_string(messages, pretty=False)
-                        print("\r", end="", flush=True)
-                    except KeyboardInterrupt or Exception as e:
-                        if isinstance(e, KeyboardInterrupt):
-                            print(f"Error auto-naming session: {e}")
+                    except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
+                        if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
+                            print("Auto-naming cancelled.")
                         else:
-                            print("Auto-naming interrupted by user.")
-                        print("Falling back to time stamp.")
+                            print(f"Error auto-naming session: {e}.")
+                        print("Falling back to time stamp.\n")
                         session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
                     session_name = session_name.strip().lower()

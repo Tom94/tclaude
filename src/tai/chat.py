@@ -21,6 +21,7 @@ import contextlib
 import datetime
 import json
 import os
+import sys
 
 from prompt_toolkit import PromptSession, print_formatted_text, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
@@ -166,15 +167,10 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-async def async_main(args, history: list[dict]):
+async def async_chat(args, history: list[dict], user_input: str):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    # Get user input from arguments or stdin
-    user_input = ""
-    if args.input:
-        user_input = " ".join(args.input)
-
     # Read system prompt from file if provided
     system_prompt = None
     if args.role:
@@ -236,9 +232,6 @@ async def async_main(args, history: list[dict]):
                     user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
                 except (EOFError, KeyboardInterrupt):
                     break
-            else:
-                prompt_session.history.append_string(user_input)
-                print_formatted_text(ANSI(common.prompt_style(f"{common.CHEVRON} {user_input}")))
 
             history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
             user_input = ""
@@ -364,19 +357,5 @@ async def async_main(args, history: list[dict]):
         total_tokens.print_cost(args.model)
 
 
-def main_with_args_and_history(args, history: list[dict]):
-    asyncio.run(async_main(args, history))
-
-
-def main():
-    args = common.parse_args()
-
-    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
-    if history:
-        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
-
-    main_with_args_and_history(args, history)
-
-
-if __name__ == "__main__":
-    main()
+def chat(args, history: list[dict], user_input: str):
+    asyncio.run(async_chat(args, history, user_input))

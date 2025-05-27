@@ -17,30 +17,48 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import sys
 
 from . import common
 from .print import history_to_string, print_decoy_prompt
 
 
+def reattach_stdin():
+    if os.name == "nt":  # Windows
+        import msvcrt
+
+        sys.stdin = open("CON", "r")
+    else:  # Unix/Linux/macOS
+        sys.stdin = open("/dev/tty", "r")
+
+
 def main():
-    """
-    Print prompt and load/print history before importing any other modules to hide startup delay of slower imports.
-    This makes a huge difference in perceived responsiveness when launching the interactive CLI.
-    """
-    if not os.isatty(0):
-        print(f"chat.py should only be run in interactive mode. Use prompt.py otherwise.")
-        exit(1)
+    # If stdout is not a terminal, execute in prompt mode. No interactive chat; no progressive printing; no history.
+    if not os.isatty(1):
+        from . import prompt
+
+        prompt.main()
+        return
 
     args = common.parse_args()
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
 
-    print_decoy_prompt()
+    # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
+    # want to show the user something immediately.
+    user_input = ""
+    if args.input:
+        user_input = " ".join(args.input)
+    elif not sys.stdin.isatty() and not sys.stdin.closed:
+        user_input = sys.stdin.read().strip()
+        reattach_stdin()
+
+    print_decoy_prompt(user_input)
 
     from . import chat
 
-    chat.main_with_args_and_history(args, history)
+    chat.chat(args, history, user_input)
 
 
 if __name__ == "__main__":

@@ -307,10 +307,14 @@ def history_to_string(history: list[dict], pretty: bool, wrap_width: int = 0) ->
     return rstrip(io).getvalue()
 
 
-def print_decoy_prompt():
+def print_decoy_prompt(user_input: str):
     """
     Reproduce the initial prompt that prompt_toolkit will produce. Requires a bit of bespoke formatting to match exactly.
     """
+    if user_input:
+        print(f"{common.prompt_style(common.CHEVRON)} {user_input}")
+        return
+
     initial_prompt = common.char_wrap(f"  {common.HELP_TEXT}", os.get_terminal_size().columns - 2)
     num_newlines = initial_prompt.count("\n")
     ansi_return = "\033[F" * num_newlines + common.ansi("3G")
@@ -341,7 +345,7 @@ def main():
         with open(args.path, "r") as f:
             history = json.load(f)
 
-        wrap_width = os.get_terminal_size().columns if os.isatty(0) else 0
+        wrap_width = os.get_terminal_size().columns if os.isatty(1) else 0
 
         result = history_to_string(history, pretty=args.pretty, wrap_width=wrap_width)
         print(result, end="", flush=True)

@@ -23,7 +23,7 @@ import time
 from typing import Optional
 
 CHEVRON = ""
-HELP_TEXT = "Type your message and hit Enter. Ctrl-C to exit, ESC for Vi mode, \\-Enter for newline."
+HELP_TEXT = "Type your message and hit Enter. Ctrl-D to exit, ESC for Vi mode, \\-Enter for newline."
 
 SPINNER_FPS = 10  # Frames per second for spinner animation
 

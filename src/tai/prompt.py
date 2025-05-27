@@ -202,12 +202,12 @@ class TokenCounter:
         cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
         return cache_creation_cost + cache_read_cost + input_cost + output_cost
 
-    def print_tokens(self):
-        print(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
+    def print_tokens(self, print_fun):
+        print_fun(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
 
-    def print_cost(self, model: str):
+    def print_cost(self, print_fun, model: str):
         cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
-        print(
+        print_fun(
             f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}"
         )
 
@@ -284,7 +284,6 @@ async def stream_response(
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.
     """
-
     if not history or history[-1].get("role", "") != "user":
         raise ValueError("The last message in history must be the user prompt.")
 

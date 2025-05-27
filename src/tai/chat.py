@@ -58,8 +58,8 @@ def create_prompt_key_bindings():
 
 
 async def user_prompt(
-    lprompt: Callable[[], Coroutine[Any, Any, str]],
-    rprompt: Callable[[], Coroutine[Any, Any, str]],
+    lprompt: Callable[[], str],
+    rprompt: Callable[[], str],
     prompt_session: PromptSession,
     key_bindings: KeyBindings,
 ) -> str:
@@ -69,16 +69,19 @@ async def user_prompt(
         with patch_stdout():
 
             async def animate_prompts():
-                while True:
-                    await asyncio.sleep(1 / SPINNER_FPS)
-                    prompt_session.message = ANSI(common.prompt_style(await lprompt()))
-                    prompt_session.rprompt = ANSI(common.prompt_style(await rprompt()))
+                try:
+                    while True:
+                        await asyncio.sleep(1 / SPINNER_FPS)
+                        prompt_session.message = ANSI(common.prompt_style(lprompt()))
+                        prompt_session.rprompt = ANSI(common.prompt_style(rprompt()))
+                except asyncio.CancelledError:
+                    pass
 
             animate_task = asyncio.create_task(animate_prompts())
             try:
                 user_input = await prompt_session.prompt_async(
-                    ANSI(common.prompt_style(await lprompt())),
-                    rprompt=ANSI(common.prompt_style(await rprompt())),
+                    ANSI(common.prompt_style(lprompt())),
+                    rprompt=ANSI(common.prompt_style(rprompt())),
                     vi_mode=True,
                     cursor=ModalCursorShapeConfig(),
                     multiline=True,
@@ -89,10 +92,7 @@ async def user_prompt(
                 )
             finally:
                 animate_task.cancel()
-                try:
-                    await animate_task
-                except asyncio.CancelledError:
-                    pass
+                await animate_task
 
             user_input = user_input.strip()
 
@@ -188,51 +188,43 @@ async def async_main(args, history: list[dict]):
         print(to_print.getvalue(), end="", flush=True)
         num_newlines_printed = len(lines) - 1
 
-    async def handle_autoname_result(autoname_task: asyncio.Task) -> str:
-        nonlocal total_tokens
+    def handle_autoname_result(autoname_task: asyncio.Task):
+        nonlocal total_tokens, session_name
 
         try:
-            messages, tokens, _ = await autoname_task
+            messages, tokens, _ = autoname_task.result()
             total_tokens += tokens
             session_name = history_to_string(messages, pretty=False)
             print("\r", end="", flush=True)
-        except KeyboardInterrupt:
-            print("interrupted by user.")
+        except KeyboardInterrupt or Exception as e:
+            if isinstance(e, KeyboardInterrupt):
+                print(f"Error auto-naming session: {e}")
+            else:
+                print("Auto-naming interrupted by user.")
             print("Falling back to time stamp.")
-            session_name = datetime.datetime.now().strftime("%H-%M-%S")
-        except Exception as e:
-            print(f"error auto-naming session: {e}")
-            print(f"Falling back to time stamp.")
             session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
         session_name = session_name.lower().replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
         session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
 
         date = datetime.datetime.now().strftime("%Y-%m-%d")
-        return f"{date}-{session_name}"
+        session_name = f"{date}-{session_name}"
 
     autoname_task = None
 
-    async def lprompt() -> str:
+    def lprompt() -> str:
         return f"{common.CHEVRON} "
 
-    async def rprompt() -> str:
-        nonlocal autoname_task, session_name
-
+    def rprompt() -> str:
         rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
         if args.role:
             prompt_role = os.path.splitext(os.path.basename(args.role))[0]
             rprompt = f"󱜙 {prompt_role}  {rprompt}"
 
-        if session_name is None and autoname_task is not None:
-            if autoname_task.done():
-                session_name = await handle_autoname_result(autoname_task)
-                autoname_task = None
-            else:
-                rprompt = f" auto-naming {common.spinner()}  {rprompt}"
-
         if session_name is not None:
             rprompt = f" {session_name}  {rprompt}"
+        elif autoname_task is not None:
+            rprompt = f" auto-naming {common.spinner()}  {rprompt}"
 
         return rprompt
 
@@ -319,19 +311,19 @@ async def async_main(args, history: list[dict]):
                         enable_thinking=False,
                     )
                 )
+                autoname_task.add_done_callback(handle_autoname_result)
 
     print()
 
     # If we submitted a user prompt and received a response (at least 2 messages), save the session.
     if len(history) - initial_history_length >= 2:
         # To obtain the path to save to, we follow these rules:
-        # 1. If no session name is provided, we use the autoname task result if available.
+        # 1. If no session name is provided but an autoname task is running, wait for that.
         # 2. If the path does not end with .json, we append .json.
         # 3. If the path does not exist, we prepend the sessions directory.
         # 4. We write the session file regardless of whether the final path exists or not.
-        if session_name is None:
-            if autoname_task is not None:
-                session_name = await handle_autoname_result(autoname_task)
+        if autoname_task and not autoname_task.done():
+            await autoname_task
 
         if session_name:
             session_path = session_name

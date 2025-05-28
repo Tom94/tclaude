@@ -30,6 +30,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from typing import Callable
 
 from . import common
+from .live_print import live_print
 from .print import history_to_string
 from .prompt import stream_response, TokenCounter
 
@@ -60,60 +61,6 @@ def perror(*args, **kwargs):
     Print error messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
     """
     pplain("[✗]", *args, **kwargs)
-
-
-@contextlib.asynccontextmanager
-async def live_print(print_fun, get_to_print: Callable[[], str], transient: bool = True):
-    import asyncio
-    from io import StringIO
-
-    num_newlines_printed = 0
-
-    def clear_and_print(final: bool):
-        nonlocal num_newlines_printed
-
-        to_print = StringIO()
-
-        # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
-        if num_newlines_printed > 0:
-            to_print.write(f"\033[{num_newlines_printed}F")
-        to_print.write("\r\033[J")
-
-        if final and transient:
-            print_fun(to_print.getvalue(), end="", flush=True)
-            return
-
-        term_height = os.get_terminal_size().lines
-        lines = get_to_print().split("\n")
-
-        # Print the last term_height - 1 lines of the history to avoid terminal problems upon clearing again.
-        # However, if we're the final print, we no longer need to clear, so we should print all lines.
-        if not final:
-            if len(lines) >= term_height:
-                lines = lines[-(term_height - 1) :]
-
-        to_print.write("\n".join(lines))
-
-        print_fun(to_print.getvalue(), end="", flush=True)
-        num_newlines_printed = len(lines) - 1
-
-    async def live_print_task():
-        try:
-            while True:
-                clear_and_print(final=False)
-                await asyncio.sleep(1.0 / common.SPINNER_FPS)
-        except asyncio.CancelledError:
-            pass
-
-    task = asyncio.create_task(live_print_task())
-    try:
-        yield task
-    finally:
-        task.cancel()
-        try:
-            await task
-        finally:
-            clear_and_print(final=True)
 
 
 def create_prompt_key_bindings():
@@ -393,6 +340,7 @@ async def async_chat(args, history: list[dict], user_input: str):
 
                     date = datetime.datetime.now().strftime("%Y-%m-%d")
                     session_name = f"{date}-{session_name}"
+                    psuccess(f"Session auto-named: {session_name}")
 
                 autoname_task.add_done_callback(handle_autoname_result)
 

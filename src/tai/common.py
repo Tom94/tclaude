@@ -18,33 +18,21 @@
 
 import argparse
 import os
-import time
+import sys
 
-from typing import Optional
+from typing import Callable, Optional
 
 CHEVRON = ""
 HELP_TEXT = "Type your message and hit Enter. Ctrl-D to exit, ESC for Vi mode, \\-Enter for newline."
 
-SPINNER_FPS = 10  # Frames per second for spinner animation
-
-
-def spinner() -> str:
-    """
-    Return a spinner frame based on the index.
-    """
-    frames = [
-        "⠲",
-        "⠴",
-        "⠦",
-        "⠖",
-    ]
-    # frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
-    sidx = int(time.perf_counter() * SPINNER_FPS)
-    return frames[sidx % len(frames)]
-
 
 def ansi(cmd: str) -> str:
     return f"\033[{cmd}"
+
+
+ANSI_MID_GRAY = ansi("0;38;5;245m")
+ANSI_BOLD_YELLOW = ansi("1;33m")
+ANSI_BOLD_BRIGHT_RED = ansi("1;91m")
 
 
 def wrap_style(msg: str, cmd: str, pretty=True) -> str:
@@ -63,6 +51,41 @@ def gray_style(msg: str) -> str:
 
 def input_style(msg: str) -> str:
     return wrap_style(msg, "1m")  # bold
+
+
+def pplain(*args, **kwargs):
+    """
+    Print plain messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
+    """
+    print(gray_style(" ".join(map(str, args))), **kwargs)
+
+
+def pinfo(*args, **kwargs):
+    """
+    Print info messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
+    """
+    pplain("[i]", *args, **kwargs)
+
+
+def psuccess(*args, **kwargs):
+    """
+    Print success messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
+    """
+    pplain("[✓]", *args, **kwargs)
+
+
+def pwarning(*args, **kwargs):
+    """
+    Print warning messages to stderr. Use this instead of print() to ensure that the output is formatted correctly.
+    """
+    pplain(f"[{ANSI_BOLD_YELLOW}w{ANSI_MID_GRAY}]", *args, **kwargs, file=sys.stderr)
+
+
+def perror(*args, **kwargs):
+    """
+    Print error messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
+    """
+    pplain(f"[{ANSI_BOLD_BRIGHT_RED}e{ANSI_MID_GRAY}]", *args, **kwargs, file=sys.stderr)
 
 
 def get_config_dir() -> str:
@@ -192,30 +215,53 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def bat_syntax_highlight(string: str, language: str) -> str:
+def make_check_bat_available() -> Callable[[], bool]:
+    is_bat_available = None
+
+    def check_bat_available() -> bool:
+        nonlocal is_bat_available
+        if is_bat_available is None:
+            import subprocess
+
+            try:
+                subprocess.run(["bat", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                is_bat_available = True
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                is_bat_available = False
+                pwarning("Install `bat` (https://github.com/sharkdp/bat) to enable syntax highlighting.")
+
+        return is_bat_available
+
+    return check_bat_available
+
+
+check_bat_available = make_check_bat_available()
+
+
+def syntax_highlight(string: str, language: str) -> str:
     """
     Turn string pretty by piping it through bat
     """
-    try:
-        import subprocess
 
-        command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
-
-        # Use bat to pretty print the string
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        output, error = process.communicate(input=string.encode("utf-8"))
-
-        if process.returncode != 0:
-            raise Exception(f"Error: {error.decode('utf-8')}")
-        return output.decode("utf-8")
-    except FileNotFoundError:
-        # If bat is not installed, fall back to regular print
+    if not check_bat_available():
         return string
+
+    import subprocess
+
+    command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
+
+    # Use bat to pretty print the string
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    output, error = process.communicate(input=string.encode("utf-8"))
+
+    if process.returncode != 0:
+        raise Exception(f"Error: {error.decode('utf-8')}")
+    return output.decode("utf-8")
 
 
 def char_wrap(text: str, wrap_width: int) -> str:

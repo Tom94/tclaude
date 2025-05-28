@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
 
+# tai -- Terminal AI
+#
+# Copyright (C) 2025 Thomas Müller <contact@tom94.net>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import asyncio
 import contextlib
 import os
@@ -8,75 +25,7 @@ import sys
 from io import StringIO
 from typing import Callable, TextIO
 
-from . import common
-from .print import rstrip
-
-
-def nth_rfind(string, char, n):
-    pos = len(string)
-    for _ in range(n):
-        pos = string.rfind(char, 0, pos)
-        if pos == -1:
-            return -1
-    return pos
-
-
-@contextlib.asynccontextmanager
-async def live_print(print_fun, get_live_text: Callable[[], str], transient: bool = True):
-    with StdoutProxy() as stdout_proxy:
-        num_newlines_printed = 0
-
-        def clear_and_print(final: bool):
-            nonlocal num_newlines_printed
-
-            to_print = StringIO()
-
-            # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
-            if num_newlines_printed > 0:
-                to_print.write(f"\033[{num_newlines_printed}F")
-            to_print.write("\r\033[J")
-
-            if final and transient:
-                to_print.write(stdout_proxy.getvalue())
-                print_fun(to_print.getvalue(), end="", flush=True)
-                return
-
-            term_height = os.get_terminal_size().lines
-
-            text = get_live_text()
-            if not stdout_proxy.empty:
-                text = f"{text}\n\n{stdout_proxy.getvalue().rstrip()}"
-
-            # Print the last term_height - 1 lines of the history to avoid terminal problems upon clearing again.
-            # However, if we're the final print, we no longer need to clear, so we should print all lines.
-            if not final:
-                split_idx = nth_rfind(text, "\n", term_height)
-                if split_idx != -1:
-                    text = text[split_idx + 1 :]
-
-            to_print.write(text)
-
-            print_fun(to_print.getvalue(), end="", flush=True, file=stdout_proxy.original_stdout)
-
-            num_newlines_printed = text.count("\n")
-
-        async def live_print_task():
-            try:
-                while True:
-                    clear_and_print(final=False)
-                    await asyncio.sleep(1.0 / common.SPINNER_FPS)
-            except asyncio.CancelledError:
-                pass
-
-        task = asyncio.create_task(live_print_task())
-        try:
-            yield task
-        finally:
-            task.cancel()
-            try:
-                await task
-            finally:
-                clear_and_print(final=True)
+from .spinner import SPINNER_FPS
 
 
 class StdoutProxy:
@@ -131,3 +80,70 @@ class StdoutProxy:
     @property
     def errors(self) -> str:
         return "strict"
+
+
+def nth_rfind(string, char, n):
+    pos = len(string)
+    for _ in range(n):
+        pos = string.rfind(char, 0, pos)
+        if pos == -1:
+            return -1
+    return pos
+
+
+@contextlib.asynccontextmanager
+async def live_print(print_fun, get_live_text: Callable[[], str], transient: bool = True):
+    with StdoutProxy() as stdout_proxy:
+        num_newlines_printed = 0
+
+        def clear_and_print(final: bool):
+            nonlocal num_newlines_printed
+
+            to_print = StringIO()
+
+            # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
+            if num_newlines_printed > 0:
+                to_print.write(f"\033[{num_newlines_printed}F")
+            to_print.write("\r\033[J")
+
+            if final and transient:
+                to_print.write(stdout_proxy.getvalue())
+                print_fun(to_print.getvalue(), end="", flush=True)
+                return
+
+            term_height = os.get_terminal_size().lines
+
+            text = get_live_text()
+            if not stdout_proxy.empty:
+                text = f"{text}\n\n{stdout_proxy.getvalue().rstrip()}"
+
+            # Print the last term_height - 1 lines of the history to avoid terminal problems upon clearing again.
+            # However, if we're the final print, we no longer need to clear, so we should print all lines.
+            if not final:
+                split_idx = nth_rfind(text, "\n", term_height)
+                if split_idx != -1:
+                    text = text[split_idx + 1 :]
+
+            to_print.write(text)
+
+            print_fun(to_print.getvalue(), end="", flush=True, file=stdout_proxy.original_stdout)
+
+            num_newlines_printed = text.count("\n")
+
+        async def live_print_task():
+            try:
+                while True:
+                    clear_and_print(final=False)
+                    await asyncio.sleep(1.0 / SPINNER_FPS)
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(live_print_task())
+        try:
+            yield task
+        finally:
+            task.cancel()
+            try:
+                await task
+            finally:
+                clear_and_print(final=True)

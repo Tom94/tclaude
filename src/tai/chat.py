@@ -17,50 +17,22 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-import contextlib
 import datetime
 import json
 import os
 import signal
 
-from prompt_toolkit import PromptSession, print_formatted_text, ANSI
+from prompt_toolkit import PromptSession, ANSI
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.patch_stdout import patch_stdout
 from typing import Callable
 
 from . import common
-from .live_print import live_print
+from .common import pplain, perror, psuccess, pinfo
+from .live_print import live_print, StdoutProxy
 from .print import history_to_string
 from .prompt import stream_response, TokenCounter
-
-
-def pplain(*args, **kwargs):
-    """
-    Print plain messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    print(common.gray_style(" ".join(map(str, args))), **kwargs)
-
-
-def pinfo(*args, **kwargs):
-    """
-    Print info messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    pplain("[i]", *args, **kwargs)
-
-
-def psuccess(*args, **kwargs):
-    """
-    Print success messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    pplain("[✓]", *args, **kwargs)
-
-
-def perror(*args, **kwargs):
-    """
-    Print error messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    pplain("[✗]", *args, **kwargs)
+from .spinner import spinner, SPINNER_FPS
 
 
 def create_prompt_key_bindings():
@@ -101,37 +73,47 @@ def create_prompt_key_bindings():
 
 
 async def user_prompt(
-    lprompt: Callable[[], str],
-    rprompt: Callable[[], str],
+    lprompt: Callable[[str], str],
+    rprompt: Callable[[str], str],
     prompt_session: PromptSession,
     key_bindings: KeyBindings,
 ) -> str:
     print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
     user_input = ""
     while not user_input:
-        with patch_stdout(raw=True):
+        with StdoutProxy() as stdout_proxy:
+
+            def prefix() -> str:
+                result = ""
+                if not stdout_proxy.empty:
+                    result = f"{stdout_proxy.getvalue().rstrip()}\n\n"
+                return result
 
             async def animate_prompts():
                 try:
                     while True:
-                        await asyncio.sleep(1 / common.SPINNER_FPS)
-                        prompt_session.message = ANSI(common.prompt_style(lprompt()))
-                        prompt_session.rprompt = ANSI(common.prompt_style(rprompt()))
+                        await asyncio.sleep(1 / SPINNER_FPS)
+
+                        lprefix = prefix()
+                        rprefix = "\n" * lprefix.count("\n")
+
+                        prompt_session.message = ANSI(common.prompt_style(lprompt(lprefix)))
+                        prompt_session.rprompt = ANSI(common.prompt_style(rprompt(rprefix)))
                 except asyncio.CancelledError:
                     pass
 
             animate_task = asyncio.create_task(animate_prompts())
             try:
                 user_input = await prompt_session.prompt_async(
-                    ANSI(common.prompt_style(lprompt())),
-                    rprompt=ANSI(common.prompt_style(rprompt())),
+                    ANSI(common.prompt_style(lprompt(""))),
+                    rprompt=ANSI(common.prompt_style(rprompt(""))),
                     vi_mode=True,
                     cursor=ModalCursorShapeConfig(),
                     multiline=True,
                     wrap_lines=True,
                     placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
                     key_bindings=key_bindings,
-                    refresh_interval=1 / common.SPINNER_FPS,
+                    refresh_interval=1 / SPINNER_FPS,
                     handle_sigint=False,
                 )
             finally:
@@ -200,14 +182,14 @@ async def async_chat(args, history: list[dict], user_input: str):
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
     def history_or_spinner(messages: list[dict]):
         current_message = history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns)
-        return current_message if current_message else f"{common.spinner()} "
+        return current_message if current_message else f"{spinner()} "
 
     autoname_task = None
 
-    def lprompt() -> str:
-        return f"{common.CHEVRON} "
+    def lprompt(prefix: str) -> str:
+        return f"{prefix}{common.prompt_style(common.CHEVRON)} "
 
-    def rprompt() -> str:
+    def rprompt(prefix: str) -> str:
         rprompt = f"{total_tokens.total_cost(args.model):.03f}   {common.friendly_model_name(args.model)} "
         if args.role:
             prompt_role = os.path.splitext(os.path.basename(args.role))[0]
@@ -216,9 +198,9 @@ async def async_chat(args, history: list[dict], user_input: str):
         if session_name is not None:
             rprompt = f" {session_name}  {rprompt}"
         elif autoname_task is not None:
-            rprompt = f" auto-naming {common.spinner()}  {rprompt}"
+            rprompt = f" auto-naming {spinner()}  {rprompt}"
 
-        return rprompt
+        return f"{prefix}{rprompt}"
 
     stream_task: asyncio.Task | None = None
     is_user_turn = True

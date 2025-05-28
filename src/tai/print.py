@@ -25,6 +25,7 @@ from typing import Optional, Union
 
 from . import common
 from .common import wrap_style
+from .spinner import spinner
 
 def rstrip(io: StringIO) -> StringIO:
     """
@@ -146,7 +147,7 @@ def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: boo
     def check_tool_result(title: str, text: str, tool_id: str) -> tuple[str, str, Optional[dict]]:
         tool_result = tool_results.get(tool_id)
         if tool_result is None:
-            title += f" {common.spinner()}"
+            title += f" {spinner()}"
         else:
             if tool_result.get("is_error"):
                 title += f" ✗"
@@ -184,7 +185,7 @@ def write_tool_use(tool_use: dict, tool_results: dict, io: StringIO, pretty: boo
     text = common.word_wrap(text, wrap_width - 2)
 
     if pretty and language:
-        text = common.bat_syntax_highlight(text, language)
+        text = common.syntax_highlight(text, language)
 
     title, text, tool_result = check_tool_result(title, text, tool_use.get("id", ""))
     write_call_block(title, text, io, pretty, wrap_width=0)  # We already wrapped prior to syntax highlighting
@@ -261,7 +262,7 @@ def write_assistant_message(tool_results: dict, message: dict, io: StringIO, pre
 
             text = common.word_wrap(rstrip(text_io).getvalue(), wrap_width)
             if pretty:
-                text = common.bat_syntax_highlight(text, "md")
+                text = common.syntax_highlight(text, "md")
 
             io.write(text)
             i -= 1  # Adjust for the outer loop increment

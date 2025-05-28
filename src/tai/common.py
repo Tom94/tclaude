@@ -158,9 +158,16 @@ def parse_args():
     parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
     parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("-v", "--version", action="store_true", help="Print version information and exit")
 
     args = parser.parse_args()
+    if args.version:
+        from . import __version__
+
+        print(f"tai — Terminal AI\nversion {__version__}")
+        sys.exit(0)
+
     args.model = deduce_model_name(args.model)
     return args
 

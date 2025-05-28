@@ -4,6 +4,9 @@ line-length = 140
 [tool.isort]
 profile = "black"
 
+[tool.basedpyright]
+reportIgnoreCommentWithoutRule = false
+
 [project]
 name = "tai"
 dynamic = ["version"]

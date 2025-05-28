@@ -24,8 +24,6 @@ from .print import history_to_string, print_decoy_prompt
 
 def reattach_stdin():
     if os.name == "nt":  # Windows
-        import msvcrt
-
         sys.stdin = open("CON", "r")
     else:  # Unix/Linux/macOS
         sys.stdin = open("/dev/tty", "r")
@@ -39,7 +37,7 @@ def main():
         prompt.main()
         return
 
-    args = common.parse_args()
+    args = common.parse_tai_args()
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")

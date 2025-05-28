@@ -17,70 +17,16 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-import contextlib
 import os
 import sys
+from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from typing import Callable, TextIO
 
 from .spinner import SPINNER_FPS
 
 
-class StdoutProxy:
-    def __init__(self):
-        self._buffer: StringIO = StringIO()
-
-        self._stdout = sys.stdout
-        self._stderr = sys.stderr
-
-        self._output: TextIO = sys.stdout
-
-    def __enter__(self) -> "StdoutProxy":
-        sys.stdout = self
-        sys.stderr = self
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        sys.stdout = self._stdout
-        sys.stderr = self._stderr
-
-    def write(self, data: str) -> int:
-        self._buffer.write(data)
-        return len(data)
-
-    def flush(self) -> None:
-        pass
-
-    def getvalue(self) -> str:
-        return self._buffer.getvalue()
-
-    @property
-    def empty(self) -> bool:
-        return self._buffer.tell() == 0
-
-    @property
-    def original_stdout(self) -> TextIO | None:
-        return self._stdout or sys.__stdout__
-
-    # Attributes for compatibility with sys.__stdout__:
-
-    def fileno(self) -> int:
-        return self._output.fileno()
-
-    def isatty(self) -> bool:
-        stdout = self._stdout
-        return stdout.isatty() if stdout is not None else False
-
-    @property
-    def encoding(self) -> str:
-        return self._stdout.encoding
-
-    @property
-    def errors(self) -> str:
-        return "strict"
-
-
-def nth_rfind(string, char, n):
+def nth_rfind(string: str, char: str, n: int) -> int:
     pos = len(string)
     for _ in range(n):
         pos = string.rfind(char, 0, pos)
@@ -89,9 +35,10 @@ def nth_rfind(string, char, n):
     return pos
 
 
-@contextlib.asynccontextmanager
-async def live_print(print_fun, get_live_text: Callable[[], str], transient: bool = True):
-    with StdoutProxy() as stdout_proxy:
+@asynccontextmanager
+async def live_print(get_live_text: Callable[[], str], transient: bool = True):
+    original_stdout: TextIO = sys.stdout
+    with StringIO() as stdout, redirect_stdout(stdout), redirect_stderr(stdout):
         num_newlines_printed = 0
 
         def clear_and_print(final: bool):
@@ -101,19 +48,19 @@ async def live_print(print_fun, get_live_text: Callable[[], str], transient: boo
 
             # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
             if num_newlines_printed > 0:
-                to_print.write(f"\033[{num_newlines_printed}F")
-            to_print.write("\r\033[J")
+                _ = to_print.write(f"\033[{num_newlines_printed}F")
+            _ = to_print.write("\r\033[J")
 
             if final and transient:
-                to_print.write(stdout_proxy.getvalue())
-                print_fun(to_print.getvalue(), end="", flush=True)
+                _ = to_print.write(stdout.getvalue())
+                print(to_print.getvalue(), end="", flush=True, file=original_stdout)
                 return
 
             term_height = os.get_terminal_size().lines
 
             text = get_live_text()
-            if not stdout_proxy.empty:
-                text = f"{text}\n\n{stdout_proxy.getvalue().rstrip()}"
+            if not stdout.tell() == 0:
+                text = f"{text}\n\n{stdout.getvalue().rstrip()}"
 
             # Print the last term_height - 1 lines of the history to avoid terminal problems upon clearing again.
             # However, if we're the final print, we no longer need to clear, so we should print all lines.
@@ -122,9 +69,9 @@ async def live_print(print_fun, get_live_text: Callable[[], str], transient: boo
                 if split_idx != -1:
                     text = text[split_idx + 1 :]
 
-            to_print.write(text)
+            _ = to_print.write(text)
 
-            print_fun(to_print.getvalue(), end="", flush=True, file=stdout_proxy.original_stdout)
+            print(to_print.getvalue(), end="", flush=True, file=original_stdout)
 
             num_newlines_printed = text.count("\n")
 
@@ -140,7 +87,7 @@ async def live_print(print_fun, get_live_text: Callable[[], str], transient: boo
         try:
             yield task
         finally:
-            task.cancel()
+            _ = task.cancel()
             try:
                 await task
             finally:

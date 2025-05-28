@@ -21,108 +21,18 @@ import datetime
 import json
 import os
 import signal
-from typing import Callable
 
-from prompt_toolkit import ANSI, PromptSession
-from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
-from prompt_toolkit.key_binding import KeyBindings
+import aiohttp
+from prompt_toolkit import PromptSession
 
 from . import common
-from .common import perror, pinfo, pplain, psuccess
-from .live_print import StdoutProxy, live_print
+from .common import History, TaiArgs, perror, pinfo, pplain, psuccess
+from .json import JSON, get, get_or, get_or_default
+from .live_print import live_print
 from .print import history_to_string
 from .prompt import TokenCounter, stream_response
-from .spinner import SPINNER_FPS, spinner
-
-
-def create_prompt_key_bindings():
-    bindings = KeyBindings()
-
-    @bindings.add("c-d")
-    def _(event):
-        if not event.app.current_buffer.text:
-            event.app.current_buffer.text = " "
-        event.app.exit(exception=EOFError, style="class:aborting")
-
-    @bindings.add("c-c")
-    def _(event):
-        if not event.app.current_buffer.text:
-            event.app.current_buffer.text = " "
-        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
-
-    @bindings.add("enter")
-    def _(event):
-        if not event.app.current_buffer.text:
-            # Hide placeholder text when the user presses enter.
-            event.app.current_buffer.text = " "
-        event.app.current_buffer.validate_and_handle()
-
-    @bindings.add("\\", "enter")
-    def _(event):
-        event.app.current_buffer.newline()
-
-    @bindings.add("c-p")
-    def _(event):
-        event.app.current_buffer.history_backward()
-
-    @bindings.add("c-n")
-    def _(event):
-        event.app.current_buffer.history_forward()
-
-    return bindings
-
-
-async def user_prompt(
-    lprompt: Callable[[str], str],
-    rprompt: Callable[[str], str],
-    prompt_session: PromptSession,
-    key_bindings: KeyBindings,
-) -> str:
-    print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
-    user_input = ""
-    while not user_input:
-        with StdoutProxy() as stdout_proxy:
-
-            def prefix() -> str:
-                result = ""
-                if not stdout_proxy.empty:
-                    result = f"{stdout_proxy.getvalue().rstrip()}\n\n"
-                return result
-
-            async def animate_prompts():
-                try:
-                    while True:
-                        await asyncio.sleep(1 / SPINNER_FPS)
-
-                        lprefix = prefix()
-                        rprefix = "\n" * lprefix.count("\n")
-
-                        prompt_session.message = ANSI(common.prompt_style(lprompt(lprefix)))
-                        prompt_session.rprompt = ANSI(common.prompt_style(rprompt(rprefix)))
-                except asyncio.CancelledError:
-                    pass
-
-            animate_task = asyncio.create_task(animate_prompts())
-            try:
-                user_input = await prompt_session.prompt_async(
-                    ANSI(common.prompt_style(lprompt(""))),
-                    rprompt=ANSI(common.prompt_style(rprompt(""))),
-                    vi_mode=True,
-                    cursor=ModalCursorShapeConfig(),
-                    multiline=True,
-                    wrap_lines=True,
-                    placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
-                    key_bindings=key_bindings,
-                    refresh_interval=1 / SPINNER_FPS,
-                    handle_sigint=False,
-                )
-            finally:
-                animate_task.cancel()
-                await animate_task
-
-        user_input = user_input.strip()
-
-    return user_input
+from .spinner import spinner
+from .terminal_prompt import terminal_prompt
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -141,7 +51,7 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-async def async_chat(args, history: list[dict], user_input: str):
+async def async_chat(args: TaiArgs, history: History, user_input: str):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -162,12 +72,15 @@ async def async_chat(args, history: list[dict], user_input: str):
 
     initial_history_length = len(history)
 
-    prompt_key_bindings = create_prompt_key_bindings()
-    prompt_session = PromptSession()
+    prompt_session: PromptSession[str] = PromptSession()
 
     for message in history:
-        if message.get("role") == "user":
-            text = message.get("content", [{}])[0].get("text", "")
+        if get(message, "role", str) == "user":
+            content_blocks = get_or_default(message, "content", list[JSON])
+            if not content_blocks:
+                continue
+
+            text = get_or(content_blocks[0], "text", "")
             if text:
                 prompt_session.history.append_string(text)
 
@@ -180,11 +93,11 @@ async def async_chat(args, history: list[dict], user_input: str):
     write_cache = False
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-    def history_or_spinner(messages: list[dict]):
+    def history_or_spinner(messages: History):
         current_message = history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns)
         return current_message if current_message else f"{spinner()} "
 
-    autoname_task = None
+    autoname_task: asyncio.Task[tuple[History, TokenCounter, bool]] | None = None
 
     def lprompt(prefix: str) -> str:
         return f"{prefix}{common.prompt_style(common.CHEVRON)} "
@@ -202,28 +115,28 @@ async def async_chat(args, history: list[dict], user_input: str):
 
         return f"{prefix}{rprompt}"
 
-    stream_task: asyncio.Task | None = None
+    stream_task: asyncio.Task[tuple[History, TokenCounter, bool]] | None = None
     is_user_turn = True
 
     # Our repl session is meant to resemble a shell, hence we don't want Ctrl-C to exit but rather cancel the current response, which
     # roughly equates to pressing Ctrl-C in a shell to stop the current command.
-    def interrupt_handler(_signum, _frame):
+    def interrupt_handler(_signum: int, _frame: object):
         if stream_task and not stream_task.done():
-            stream_task.cancel()
+            _ = stream_task.cancel()
             return
 
         # If there's no conversation to cancel, the user likely wants to cancel the autonaming task.
         if autoname_task and not autoname_task.done():
-            autoname_task.cancel()
+            _ = autoname_task.cancel()
             return
 
-    signal.signal(signal.SIGINT, interrupt_handler)
+    _ = signal.signal(signal.SIGINT, interrupt_handler)
 
     while True:
         if is_user_turn:
             if not user_input:
                 try:
-                    user_input = await user_prompt(lprompt, rprompt, prompt_session, prompt_key_bindings)
+                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session)
                 except EOFError:
                     break
                 except KeyboardInterrupt:
@@ -235,9 +148,9 @@ async def async_chat(args, history: list[dict], user_input: str):
             # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
             pass
 
-        partial = {"messages": []}
+        partial: dict[str, History] = {"messages": []}
         try:
-            async with live_print(print, lambda: history_or_spinner(partial["messages"]), transient=False):
+            async with live_print(lambda: history_or_spinner(partial["messages"]), transient=False):
                 stream_task = asyncio.create_task(
                     stream_response(
                         model=args.model,
@@ -255,9 +168,9 @@ async def async_chat(args, history: list[dict], user_input: str):
                 messages, tokens, call_again = await stream_task
 
                 is_user_turn = not call_again
-        except (asyncio.CancelledError, Exception) as e:
+        except (aiohttp.ClientError, asyncio.CancelledError) as e:
             if is_user_turn:
-                history.pop()
+                _ = history.pop()
             is_user_turn = True
 
             pplain("\n")
@@ -278,8 +191,8 @@ async def async_chat(args, history: list[dict], user_input: str):
 
         pplain("\n")
         if args.verbose:
-            tokens.print_tokens(pplain)
-            tokens.print_cost(pplain, args.model)
+            tokens.print_tokens()
+            tokens.print_cost(args.model)
             if write_cache:
                 pinfo("Next prompt will be cached.\n")
 
@@ -302,14 +215,14 @@ async def async_chat(args, history: list[dict], user_input: str):
                     )
                 )
 
-                def handle_autoname_result(autoname_task: asyncio.Task):
+                def handle_autoname_result(autoname_task: asyncio.Task[tuple[History, TokenCounter, bool]]):
                     nonlocal total_tokens, session_name
 
                     try:
                         messages, tokens, _ = autoname_task.result()
                         total_tokens += tokens
                         session_name = history_to_string(messages, pretty=False)
-                    except (asyncio.CancelledError, Exception) as e:
+                    except (aiohttp.ClientError, asyncio.CancelledError) as e:
                         if isinstance(e, asyncio.CancelledError):
                             perror("Auto-naming cancelled. Using timestamp.")
                         else:
@@ -338,13 +251,13 @@ async def async_chat(args, history: list[dict], user_input: str):
         if autoname_task:
             try:
                 if not autoname_task.done():
-                    autoname_task.cancel()
+                    _ = autoname_task.cancel()
                 await autoname_task
             except asyncio.CancelledError:
                 pass
 
         if session_name:
-            session_path = session_name
+            session_path: str = session_name
             if not session_path.lower().endswith(".json"):
                 session_path += ".json"
 
@@ -357,9 +270,9 @@ async def async_chat(args, history: list[dict], user_input: str):
             psuccess(f"Saved session to {session_path}")
 
     if args.verbose:
-        total_tokens.print_tokens(pplain)
-        total_tokens.print_cost(pplain, args.model)
+        total_tokens.print_tokens()
+        total_tokens.print_cost(args.model)
 
 
-def chat(args, history: list[dict], user_input: str):
+def chat(args: TaiArgs, history: History, user_input: str):
     asyncio.run(async_chat(args, history, user_input))

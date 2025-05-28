@@ -1,6 +1,9 @@
 [tool.black]
 line-length = 140
 
+[tool.isort]
+profile = "black"
+
 [project]
 name = "tai"
 dynamic = ["version"]

@@ -22,7 +22,6 @@ import sys
 from . import common
 from .print import history_to_string, print_decoy_prompt
 
-
 def reattach_stdin():
     if os.name == "nt":  # Windows
         import msvcrt

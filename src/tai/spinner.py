@@ -18,7 +18,6 @@
 
 import time
 
-
 SPINNER_FPS = 10  # Frames per second for spinner animation
 
 

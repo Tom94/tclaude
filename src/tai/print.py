@@ -19,13 +19,14 @@
 import argparse
 import json
 import os
-
 from io import StringIO
+from sys import stdout
 from typing import Optional, Union
 
 from . import common
 from .common import wrap_style
 from .spinner import spinner
+
 
 def rstrip(io: StringIO) -> StringIO:
     """
@@ -41,6 +42,7 @@ def rstrip(io: StringIO) -> StringIO:
     io.seek(pos)
     io.truncate()
     return io
+
 
 def to_superscript(text: Union[str, int]) -> str:
     if isinstance(text, int):

@@ -21,18 +21,18 @@ import datetime
 import json
 import os
 import signal
-
-from prompt_toolkit import PromptSession, ANSI
-from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
-from prompt_toolkit.key_binding import KeyBindings
 from typing import Callable
 
+from prompt_toolkit import ANSI, PromptSession
+from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
+from prompt_toolkit.key_binding import KeyBindings
+
 from . import common
-from .common import pplain, perror, psuccess, pinfo
-from .live_print import live_print, StdoutProxy
+from .common import perror, pinfo, pplain, psuccess
+from .live_print import StdoutProxy, live_print
 from .print import history_to_string
-from .prompt import stream_response, TokenCounter
-from .spinner import spinner, SPINNER_FPS
+from .prompt import TokenCounter, stream_response
+from .spinner import SPINNER_FPS, spinner
 
 
 def create_prompt_key_bindings():

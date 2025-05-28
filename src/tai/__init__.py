@@ -25,4 +25,3 @@ web search, code execution, and custom tools.
 """
 
 __version__ = "0.1.1"
-

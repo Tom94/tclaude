@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import aiohttp
 import asyncio
 import importlib
 import inspect
@@ -24,10 +23,11 @@ import json
 import os
 import subprocess
 import sys
-
 from io import StringIO
+from typing import AsyncIterator, Callable, Optional
+
+import aiohttp
 from partial_json_parser import loads as partial_loads
-from typing import Callable, AsyncIterator, Optional
 
 from . import common
 from .print import history_to_string

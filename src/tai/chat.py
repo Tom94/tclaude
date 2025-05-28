@@ -311,7 +311,7 @@ async def async_chat(args, history: list[dict], user_input: str):
                         session_name = history_to_string(messages, pretty=False)
                     except (asyncio.CancelledError, Exception) as e:
                         if isinstance(e, asyncio.CancelledError):
-                            perror("Auto-naming cancelled.")
+                            perror("Auto-naming cancelled. Using timestamp.")
                         else:
                             perror(f"Error auto-naming session: {e}.")
                         session_name = datetime.datetime.now().strftime("%H-%M-%S")
@@ -322,7 +322,7 @@ async def async_chat(args, history: list[dict], user_input: str):
 
                     date = datetime.datetime.now().strftime("%Y-%m-%d")
                     session_name = f"{date}-{session_name}"
-                    psuccess(f"Session auto-named: {session_name}")
+                    psuccess(f"Session named {session_name}")
 
                 autoname_task.add_done_callback(handle_autoname_result)
 

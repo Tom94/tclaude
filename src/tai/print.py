@@ -45,8 +45,7 @@ def rstrip(io: StringIO) -> StringIO:
 
 
 def to_superscript(text: str | int) -> str:
-    if isinstance(text, int):
-        text = str(text)
+    text = str(text)
     superscript_map = str.maketrans("0123456789+-=(),", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾˒")
     return text.translate(superscript_map)
 
@@ -247,7 +246,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
                 _ = text_io.write(get_or(content_block, "text", ""))
 
                 superscripts: set[str] = set()
-                citations = get_or_default(content_block, "citations", list[JSON])
+                citations = get_or_default(content_block, "citations", list[dict[str, JSON]])
                 for citation in citations:
                     if get(citation, "type", str) != "web_search_result_location":
                         continue
@@ -263,7 +262,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
                         )
 
                     reference = references[url]
-                    if isinstance(citation, Mapping) and "cited_text" in citation:
+                    if "cited_text" in citation:
                         reference.cited_texts.add(str(citation["cited_text"]))
 
                     superscripts.add(str(reference.id))

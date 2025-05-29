@@ -19,11 +19,11 @@
 import argparse
 import os
 import sys
-from typing import Callable, Literal, TextIO, cast
+from typing import Callable, Literal, TextIO, TypeAlias, cast
 
-from .json import JSON
+from .json import JSON, of_type_or_none
 
-type History = list[dict[str, JSON]]
+History: TypeAlias = list[dict[str, JSON]]
 
 
 CHEVRON = ""
@@ -162,16 +162,9 @@ def load_session_if_exists(session_name: str, sessions_dir: str) -> History:
     try:
         with open(session_name, "r") as f:
             j = cast(JSON, json.load(f))
-            valid = True
-            if not isinstance(j, list):
-                valid = False
-            else:
-                for item in j:
-                    if not isinstance(item, dict):
-                        valid = False
-                        break
-            if valid:
-                history = cast(list[dict[str, JSON]], j)
+            j = of_type_or_none(History, j)
+            if j is not None:
+                history = j
             else:
                 print(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
     except json.JSONDecodeError:

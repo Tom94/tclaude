@@ -315,15 +315,15 @@ async def stream_response(
         # First remove all but the last max-1 cache_control entries
         num_cache_breakpoints = 0
         for message in reversed(history):
-            for content_block in get_or_default(message, "content", list[JSON]):
-                if isinstance(content_block, dict) and "cache_control" in content_block:
+            for content_block in get_or_default(message, "content", list[dict[str, JSON]]):
+                if "cache_control" in content_block:
                     num_cache_breakpoints += 1
                     if num_cache_breakpoints >= MAX_NUM_CACHE_BREAKPOINTS - 1:
                         del content_block["cache_control"]
 
         # Then set a new cache breakpoint for the last message
-        last_message = get_or_default(history[-1], "content", list[JSON])
-        if last_message and isinstance(last_message[0], dict):
+        last_message = get_or_default(history[-1], "content", list[dict[str, JSON]])
+        if last_message:
             last_message[0]["cache_control"] = {"type": "ephemeral"}
 
     # Make a copy is history in which messages don't contain anything but role and content. The online APIs aren't happy if they get more

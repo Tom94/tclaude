@@ -17,25 +17,53 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from collections.abc import Mapping, Sequence
-from typing import cast
+from types import UnionType
+from typing import TypeAlias, cast, get_args, get_origin
 
-type JSON = Mapping[str, JSON] | Sequence[JSON] | str | int | float | bool | None
+# Using TypeAlias instead of defining a new type such that isinstance(obj, JSON) works as expected.
+JSON: TypeAlias = Mapping[str, "JSON"] | Sequence["JSON"] | str | int | float | bool | None
+
+# Allows for nested generic types, as well as unions. The type taken by `isinstance`.
+ClassOrTuple: TypeAlias = type | tuple["ClassOrTuple", ...] | UnionType
+
+
+def generic_is_instance(obj: JSON, target_type: ClassOrTuple) -> bool:
+    """
+    Check if an object is an instance of a generic type, including nested types.
+    """
+    origin = get_origin(target_type)
+    if origin is None or target_type is UnionType:
+        return isinstance(obj, target_type)
+
+    args = get_args(target_type)
+    if origin is list:
+        T = cast(ClassOrTuple, args[0])
+        return isinstance(obj, list) and all(generic_is_instance(item, T) for item in obj)
+    elif origin is dict:
+        K = cast(ClassOrTuple, args[0])
+        V = cast(ClassOrTuple, args[1])
+        return isinstance(obj, dict) and all(generic_is_instance(k, K) and generic_is_instance(v, V) for k, v in obj.items())
+    elif origin is UnionType:
+        assert args == get_args(JSON), "UnionType should only be used with JSON types"
+        return isinstance(obj, (str, int, float, bool, type(None), list, dict))
+    else:
+        return False
+
+
+def of_type_or_none[T: JSON](target_type: type[T], obj: JSON) -> T | None:
+    """
+    Safely cast an object to a target type, returning None if the object is not of the target type.
+    This is useful for JSON-like structures where types may not match exactly.
+    """
+    if generic_is_instance(obj, target_type):
+        return cast(T, obj)
+    return None
 
 
 def get[T: JSON](d: JSON, key: str, target_type: type[T]) -> T | None:
     if isinstance(d, dict) and key in d:
         v = d[key]
-        dummy = target_type()
-        # list and dict are special cases where we know that if d if JSON, then v should also be JSON, even if we don't check the generic
-        # type. The last clause is sufficient for str, int, float, bool, and None.
-        if (
-            isinstance(v, Sequence)
-            and isinstance(dummy, Sequence)
-            or isinstance(v, Mapping)
-            and isinstance(dummy, Mapping)
-            or isinstance(v, target_type)
-        ):
-            return cast(T, v)
+        return of_type_or_none(target_type, v)
     return None
 
 
@@ -50,14 +78,5 @@ def get_or[T: JSON](d: JSON, key: str, value: T) -> T:
     """
     Get a typed value from a JSON-like dictionary, returning a default value if the key is not present or not the type.
     """
-    if isinstance(d, dict) and key in d:
-        v = d[key]
-        # list and dict are special cases where we know that if d if JSON, then v should also be JSON, even if we don't check the generic
-        # type. The last clause is sufficient for str, int, float, bool, and None.
-        if (
-            (isinstance(v, Sequence) and isinstance(value, Sequence))
-            or (isinstance(v, Mapping) and isinstance(value, Mapping))
-            or type(v) is type(value)
-        ):
-            return cast(T, v)
-    return value
+    v = get(d, key, type(value))
+    return v if v is not None else value

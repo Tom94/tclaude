@@ -21,6 +21,7 @@ import inspect
 import json
 import sys
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from io import StringIO
 from typing import Callable, cast
 
@@ -212,20 +213,27 @@ class TokenCounter:
         )
 
 
-async def stream_events(url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=params) as response:
-            response.raise_for_status()
-            async for line in response.content:
-                if line.startswith(b"data: "):
-                    try:
-                        yield json.loads(line[6:])
-                    except json.JSONDecodeError:
-                        print(f"Error decoding JSON: {line[6:]}")
-                        continue
+async def stream_events(session: aiohttp.ClientSession, url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
+    async with session.post(url, headers=headers, json=params) as response:
+        response.raise_for_status()
+        async for line in response.content:
+            if line.startswith(b"data: "):
+                try:
+                    yield json.loads(line[6:])
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {line[6:]}")
+                    continue
+
+
+@dataclass
+class Response:
+    messages: History
+    tokens: TokenCounter
+    call_again: bool
 
 
 async def stream_response(
+    session: aiohttp.ClientSession,
     model: str,
     history: History,
     max_tokens: int = 16384,
@@ -235,8 +243,8 @@ async def stream_response(
     enable_thinking: bool = False,
     thinking_budget: int | None = None,
     write_cache: bool = False,
-    on_response_update: Callable[[History, TokenCounter], None] | None = None,
-) -> tuple[History, TokenCounter, bool]:
+    on_response_update: Callable[[Response], None] | None = None,
+) -> Response:
     """
     Send user input to Anthropic API and get the response by streaming for incremental output.
     """
@@ -252,6 +260,11 @@ async def stream_response(
 
     url, headers, params = endpoints.get_messages_endpoint_anthropic(model)
     # url, headers, params = endpoints.get_messages_endpoint_vertex("claude-sonnet-4@20250514")
+
+    # Use the latest container if available
+    container = common.get_latest_container(history)
+    if container is not None:
+        params["container"] = container.id
 
     if write_cache:
         # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use
@@ -325,7 +338,7 @@ async def stream_response(
     tokens = TokenCounter()
 
     # Async generator cleanup: https://www.youtube.com/watch?v=N56Jrqc7SBk
-    async with contextlib.aclosing(stream_events(url, headers, params)) as events:
+    async with contextlib.aclosing(stream_events(session, url, headers, params)) as events:
         async for data in events:
             kind = get_or(data, "type", "")
 
@@ -342,6 +355,10 @@ async def stream_response(
                     stop_reason = get(delta, "stop_reason", str)
                     if stop_reason is not None:
                         messages[-1]["stop_reason"] = stop_reason
+
+                    container = get(delta, "container", dict[str, JSON])
+                    if container:
+                        messages[-1]["container"] = container
 
                     usage = get(data, "usage", dict[str, JSON])
                     if usage:
@@ -425,7 +442,7 @@ async def stream_response(
                             pass
 
             if on_response_update is not None:
-                on_response_update(messages, tokens)
+                on_response_update(Response(messages=messages, tokens=tokens, call_again=False))
 
     stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
     if stop_reason == "pause_turn":
@@ -436,7 +453,11 @@ async def stream_response(
     else:
         call_again = False
 
-    return messages, tokens, call_again
+    return Response(
+        messages=messages,
+        tokens=tokens,
+        call_again=call_again,
+    )
 
 
 async def async_main():
@@ -464,19 +485,23 @@ async def async_main():
     # The response is already printed during streaming, so we don't need to print it again
     history: History = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
 
-    call_again = True
-    while call_again:
-        messages, _, call_again = await stream_response(
-            model=args.model,
-            history=history,
-            max_tokens=args.max_tokens,
-            enable_web_search=not args.no_web_search,  # Web search is enabled by default
-            enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-            system_prompt=system_prompt,
-            enable_thinking=args.thinking,
-            thinking_budget=args.thinking_budget,
-        )
-        history.extend(messages)
+    async with aiohttp.ClientSession() as session:
+        call_again = True
+        while call_again:
+            response = await stream_response(
+                session=session,
+                model=args.model,
+                history=history,
+                max_tokens=args.max_tokens,
+                enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                system_prompt=system_prompt,
+                enable_thinking=args.thinking,
+                thinking_budget=args.thinking_budget,
+            )
+
+            history.extend(response.messages)
+            call_again = response.call_again
 
     print(history_to_string(history[1:], pretty=False), end="", flush=True)
 

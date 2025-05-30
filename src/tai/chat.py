@@ -23,12 +23,12 @@ import signal
 import aiohttp
 from prompt_toolkit import PromptSession
 
-from . import common
+from . import common, files
 from .common import History, TaiArgs, perror, pinfo, pplain, psuccess
 from .json import JSON, get, get_or, get_or_default
 from .live_print import live_print
 from .print import history_to_string
-from .prompt import TokenCounter, stream_response
+from .prompt import Response, TokenCounter, stream_response
 from .spinner import spinner
 from .terminal_prompt import terminal_prompt
 
@@ -49,7 +49,7 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-async def async_chat(args: TaiArgs, history: History, user_input: str):
+async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -95,7 +95,7 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
         current_message = history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns)
         return current_message if current_message else f"{spinner()} "
 
-    autoname_task: asyncio.Task[tuple[History, TokenCounter, bool]] | None = None
+    autoname_task: asyncio.Task[Response] | None = None
 
     def lprompt(prefix: str) -> str:
         return f"{prefix}{common.prompt_style(common.CHEVRON)} "
@@ -113,7 +113,7 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
 
         return f"{prefix}{rprompt}"
 
-    stream_task: asyncio.Task[tuple[History, TokenCounter, bool]] | None = None
+    stream_task: asyncio.Task[Response] | None = None
     is_user_turn = True
 
     # Our repl session is meant to resemble a shell, hence we don't want Ctrl-C to exit but rather cancel the current response, which
@@ -146,11 +146,16 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
             # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
             pass
 
-        partial: dict[str, History] = {"messages": []}
+        container = common.get_latest_container(history)
+        if container is not None:
+            pinfo(f"Reusing code execution container `{container.id}`", end="\n\n")
+
+        partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
         try:
-            async with live_print(lambda: history_or_spinner(partial["messages"]), transient=False):
+            async with live_print(lambda: history_or_spinner(partial.messages), transient=False):
                 stream_task = asyncio.create_task(
                     stream_response(
+                        session=session,
                         model=args.model,
                         history=history,
                         max_tokens=args.max_tokens,
@@ -160,12 +165,13 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
                         enable_thinking=args.thinking,
                         thinking_budget=args.thinking_budget,
                         write_cache=write_cache,
-                        on_response_update=lambda m, _: partial.update({"messages": m}),
+                        on_response_update=lambda r: partial.__setattr__("messages", r.messages),
                     )
                 )
-                messages, tokens, call_again = await stream_task
 
-                is_user_turn = not call_again
+                response = await stream_task
+
+                is_user_turn = not response.call_again
         except (aiohttp.ClientError, asyncio.CancelledError) as e:
             if is_user_turn:
                 _ = history.pop()
@@ -181,16 +187,16 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
         finally:
             stream_task = None
 
-        history.extend(messages)
-        total_tokens += tokens
+        history.extend(response.messages)
+        total_tokens += response.tokens
 
         # Automatically determine whether we should put a cache breakpoint into the next prompt
-        write_cache = should_cache(tokens, args.model)
+        write_cache = should_cache(response.tokens, args.model)
 
         pplain("\n")
         if args.verbose:
-            tokens.print_tokens()
-            tokens.print_cost(args.model)
+            response.tokens.print_tokens()
+            response.tokens.print_cost(args.model)
             if write_cache:
                 pinfo("Next prompt will be cached.\n")
 
@@ -204,6 +210,7 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
                 autoname_history = history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
                 autoname_task = asyncio.create_task(
                     stream_response(
+                        session=session,
                         model=args.model,
                         history=autoname_history,
                         max_tokens=30,
@@ -213,13 +220,13 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
                     )
                 )
 
-                def handle_autoname_result(autoname_task: asyncio.Task[tuple[History, TokenCounter, bool]]):
+                def handle_autoname_result(autoname_task: asyncio.Task[Response]):
                     nonlocal total_tokens, session_name
 
                     try:
-                        messages, tokens, _ = autoname_task.result()
-                        total_tokens += tokens
-                        session_name = history_to_string(messages, pretty=False)
+                        response = autoname_task.result()
+                        total_tokens += response.tokens
+                        session_name = history_to_string(response.messages, pretty=False)
                     except (aiohttp.ClientError, asyncio.CancelledError) as e:
                         if isinstance(e, asyncio.CancelledError):
                             perror("Auto-naming cancelled. Using timestamp.")
@@ -272,5 +279,10 @@ async def async_chat(args: TaiArgs, history: History, user_input: str):
         total_tokens.print_cost(args.model)
 
 
+async def async_chat_wrapper(args: TaiArgs, history: History, user_input: str):
+    async with aiohttp.ClientSession() as session:
+        await async_chat(session, args, history, user_input)
+
+
 def chat(args: TaiArgs, history: History, user_input: str):
-    asyncio.run(async_chat(args, history, user_input))
+    asyncio.run(async_chat_wrapper(args, history, user_input))

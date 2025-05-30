@@ -17,9 +17,11 @@
 import argparse
 import os
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal, TextIO, TypeAlias, cast
 
-from .json import JSON, of_type_or_none
+from .json import JSON, get, of_type_or_none
 
 History: TypeAlias = list[dict[str, JSON]]
 
@@ -141,6 +143,36 @@ def default_sessions_dir() -> str:
     if "TAI_SESSIONS_DIR" in os.environ:
         return os.environ["TAI_SESSIONS_DIR"]
     return "."
+
+
+@dataclass
+class Container:
+    id: str
+    expires_at: datetime
+
+
+def get_latest_container(messages: History) -> Container | None:
+    """
+    Get the latest container from the messages history.
+    Returns None if no container is found.
+    """
+    for message in reversed(messages):
+        if "container" in message:
+            container_data = message["container"]
+            id = get(container_data, "id", str)
+            expires_at = get(container_data, "expires_at", str)
+            if id is None or expires_at is None:
+                continue
+
+            expires_at = datetime.fromisoformat(expires_at)
+
+            # Be conservative. If the container is just 1m from expiring, don't use it anymore.
+            if expires_at < datetime.now(timezone.utc) + timedelta(minutes=1):
+                continue
+
+            return Container(id=id, expires_at=expires_at)
+
+    return None
 
 
 def load_session_if_exists(session_name: str, sessions_dir: str) -> History:

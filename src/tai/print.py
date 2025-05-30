@@ -186,7 +186,7 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
         write_tool_result(tool_use, tool_result, io, pretty, wrap_width)
 
 
-def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: int):
+def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: int, skip_user_text: bool):
     prompt = f"{common.CHEVRON} "
 
     for content_block in get_or_default(message, "content", list[JSON]):
@@ -195,6 +195,9 @@ def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: in
             continue  # Tool results are handled in their `tool_use` block, not the result block
 
         if kind == "text":
+            if skip_user_text:
+                continue
+
             input = get_or(content_block, "text", "")
             if pretty:
                 prompt = common.prompt_style(prompt)
@@ -292,7 +295,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
             _ = io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
-def history_to_string(history: History, pretty: bool, wrap_width: int = 0) -> str:
+def history_to_string(history: History, pretty: bool, wrap_width: int = 0, skip_user_text: bool = False) -> str:
     tool_results = gather_tool_results(history)
 
     io = StringIO()
@@ -301,7 +304,7 @@ def history_to_string(history: History, pretty: bool, wrap_width: int = 0) -> st
         if role == "system":
             write_system_message(message, io)
         elif role == "user":
-            write_user_message(message, io, pretty, wrap_width=wrap_width)
+            write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text)
         elif role == "assistant":
             write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width)
 

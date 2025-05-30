@@ -19,12 +19,13 @@ import datetime
 import json
 import os
 import signal
+from itertools import chain
 
 import aiohttp
 from prompt_toolkit import PromptSession
 
 from . import common, files
-from .common import History, TaiArgs, perror, pinfo, pplain, psuccess
+from .common import History, TaiArgs, perror, pinfo, pplain, psuccess, pwarning
 from .json import JSON, get, get_or, get_or_default
 from .live_print import live_print
 from .print import history_to_string
@@ -47,6 +48,123 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     )
     _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(model)
     return cache_read_cost < input_cost
+
+
+async def wait_for_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
+    """
+    Wait for all file upload tasks to complete and return the results.
+    """
+    if not tasks:
+        return []
+
+    def download_progress_str() -> str:
+        """
+        Print the progress of file uploads.
+        """
+        completed = sum(1 for task in tasks if task.done())
+        total = len(tasks)
+        return f"[{completed}/{total}] files uploaded {spinner()}"
+
+    async with live_print(download_progress_str, transient=True):
+        results: JSON = []
+        for task in asyncio.as_completed(tasks):
+            try:
+                result = await task
+                results.append(result)
+            except aiohttp.ClientError as e:
+                perror(f"Failed to upload file: {e}")
+            except asyncio.CancelledError:
+                perror("File upload cancelled.")
+
+        return results
+
+
+def erase_file_content_blocks(history: History, file_ids: set[str]) -> None:
+    """
+    Erase all content blocks in the history that reference the given file IDs. This is useful when we want to remove file references from
+    the history after verifying or processing them.
+    """
+    for message in history:
+        if get(message, "role", str) != "user":
+            continue
+
+        content = get_or_default(message, "content", list[JSON])
+        new_content: list[JSON] = []
+        for block in content:
+            if get(block, "type", str) == "container_upload":
+                file_id = get(block, "file_id", str)
+                if file_id is not None and file_id not in file_ids:
+                    new_content.append(block)
+            elif get(block, "type", str) in ("document", "image"):
+                source = get_or_default(block, "source", dict[str, JSON])
+                file_id = get(source, "file_id", str)
+                if file_id is not None and file_id not in file_ids:
+                    new_content.append(block)
+            else:
+                new_content.append(block)
+
+        message["content"] = new_content
+
+
+def verify_uploaded_files(
+    session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]
+) -> asyncio.Future[list[JSON | BaseException]]:
+    """
+    Verify the uploaded files by checking their metadata. Returns a task that will return a list of metadata or exceptions. Modifies the
+    `uploaded_files` dictionary in place to include the metadata for each verified file ID. Non-existent or invalid files will be removed
+    from the dictionary.
+    """
+    file_upload_verification_task = asyncio.gather(
+        *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
+    )
+
+    def handle_file_upload_verification(file_upload_verification_task: asyncio.Future[list[JSON | BaseException]]):
+        """
+        Handle the result of the file upload verification task. If the task was cancelled, we don't need to do anything. If it completed
+        successfully, we update the uploaded_files dictionary with the metadata.
+        """
+        try:
+            metadata_list = file_upload_verification_task.result()
+            for metadata in metadata_list:
+                if not isinstance(metadata, BaseException):
+                    id = get_or(metadata, "id", "")
+                    if id in uploaded_files:
+                        uploaded_files[id] = metadata
+
+            # Remove any files that were not found or had an error
+            missing_files = {file_id for file_id, metadata in uploaded_files.items() if not metadata}
+            for file_id in missing_files:
+                pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
+                del uploaded_files[file_id]
+
+            erase_file_content_blocks(history, set(missing_files))
+
+        except asyncio.CancelledError:
+            pass
+
+    file_upload_verification_task.add_done_callback(handle_file_upload_verification)
+    return file_upload_verification_task
+
+
+def file_data_to_content(file: JSON) -> list[JSON]:
+    """
+    Convert a file metadata JSON object to a list of content blocks that can be added to the history.
+    """
+    content: list[JSON] = []
+
+    type = files.mime_type_to_content_block_type(get_or(file, "mime_type", ""))
+    id = get(file, "id", str)
+    if id is None:
+        return content
+
+    # Even if the type is invalid, the code execution tool might still be able to handle the file. Always put valid file IDs
+    # into the code execution container.
+    content.append({"type": "container_upload", "file_id": id})
+    if type is None:
+        return content
+
+    content.append({"type": type, "source": {"type": "file", "file_id": id}})
+    return content
 
 
 async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
@@ -72,30 +190,66 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
     prompt_session: PromptSession[str] = PromptSession()
 
+    # Process the initial history to extract various information.
+    # - User messages are appended to the prompt session history.
+    # - File uploads are checked for validity.
+    uploaded_files: dict[str, JSON] = {}
     for message in history:
-        if get(message, "role", str) == "user":
-            content_blocks = get_or_default(message, "content", list[JSON])
-            if not content_blocks:
-                continue
+        if get(message, "role", str) != "user":
+            continue
 
-            text = get_or(content_blocks[0], "text", "")
-            if text:
-                prompt_session.history.append_string(text)
+        for content_block in get_or_default(message, "content", list[JSON]):
+            type = get(content_block, "type", str)
+            if type == "text":
+                prompt_session.history.append_string(get_or(content_block, "text", ""))
+            elif type == "document" or type == "image":
+                source = get_or_default(content_block, "source", dict[str, JSON])
+                file_id = get(source, "file_id", str)
+                if file_id is not None:
+                    uploaded_files[file_id] = {}
+            elif type == "container_upload":
+                file_id = get(content_block, "file_id", str)
+                if file_id is not None:
+                    uploaded_files[file_id] = {}
+
+    file_upload_verification_task = verify_uploaded_files(session, history, uploaded_files)
 
     if user_input:
         prompt_session.history.append_string(user_input)
 
     total_tokens = TokenCounter()
 
-    # Initially, don't cache anything. The system prompt is always cached.
-    write_cache = False
+    def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
+        return history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text)
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
     def history_or_spinner(messages: History):
-        current_message = history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns)
+        current_message = pretty_history_to_string(messages, skip_user_text=True)
         return current_message if current_message else f"{spinner()} "
 
     autoname_task: asyncio.Task[Response] | None = None
+
+    def handle_file_upload_result(file_upload_task: asyncio.Task[JSON]):
+        """
+        Handle the result of a file upload task. If the task was cancelled, we don't need to do anything. If it completed successfully,
+        we update the uploaded_files dictionary with the file ID.
+        """
+        try:
+            result = file_upload_task.result()
+            file_id = get(result, "id", str)
+            if file_id is not None:
+                uploaded_files[file_id] = result
+        except asyncio.CancelledError:
+            pass
+
+    file_upload_tasks: list[asyncio.Task[JSON]] = []
+    for file in args.file:
+        if not os.path.isfile(file):
+            perror(f"File {file} does not exist or is not a file.")
+            continue
+
+        file_upload_tasks.append(asyncio.create_task(files.upload_file(session, file)))
+        file_upload_tasks[-1].add_done_callback(handle_file_upload_result)
 
     def lprompt(prefix: str) -> str:
         return f"{prefix}{common.prompt_style(common.CHEVRON)} "
@@ -110,6 +264,18 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
             rprompt = f" {session_name}  {rprompt}"
         elif autoname_task is not None:
             rprompt = f" auto-naming {spinner()}  {rprompt}"
+
+        if not file_upload_verification_task.done():
+            rprompt = f" verifying files {spinner()}  {rprompt}"
+
+        num_uploaded_files = sum(1 for metadata in uploaded_files.values() if metadata)
+        num_uploading = sum(1 for task in file_upload_tasks if not task.done())
+        num_total_files = num_uploaded_files + num_uploading
+
+        if num_uploaded_files < num_total_files:
+            rprompt = f" {num_uploaded_files}/{num_total_files} files {spinner()}  {rprompt}"
+        elif file_upload_tasks:
+            rprompt = f" {num_uploaded_files} files  {rprompt}"
 
         return f"{prefix}{rprompt}"
 
@@ -130,6 +296,8 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
     _ = signal.signal(signal.SIGINT, interrupt_handler)
 
+    response: Response | None = None
+
     while True:
         if is_user_turn:
             if not user_input:
@@ -140,15 +308,29 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                 except KeyboardInterrupt:
                     continue
 
-            history.append({"role": "user", "content": [{"type": "text", "text": user_input}]})
+            content: list[JSON] = [{"type": "text", "text": user_input}]
+            content.extend(chain.from_iterable(file_data_to_content(file) for file in await wait_for_file_uploads(file_upload_tasks)))
+            file_upload_tasks.clear()
+
+            history.append({"role": "user", "content": content})
             user_input = ""
+
+            # This includes things like file uploads, but *not* the user input text itself, which is already printed in the prompt.
+            user_history_string = pretty_history_to_string(history[-1:], skip_user_text=True)
+            if user_history_string:
+                print(user_history_string, end="\n\n")
         else:
             # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
             pass
 
         container = common.get_latest_container(history)
-        if container is not None:
-            pinfo(f"Reusing code execution container `{container.id}`", end="\n\n")
+        write_cache = should_cache(response.tokens, args.model) if response is not None else False
+
+        if args.verbose:
+            if container is not None:
+                pinfo(f"Reusing code execution container `{container.id}`")
+
+            pinfo(f"write_cache={write_cache}")
 
         partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
         try:
@@ -190,15 +372,10 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         history.extend(response.messages)
         total_tokens += response.tokens
 
-        # Automatically determine whether we should put a cache breakpoint into the next prompt
-        write_cache = should_cache(response.tokens, args.model)
-
         pplain("\n")
         if args.verbose:
             response.tokens.print_tokens()
             response.tokens.print_cost(args.model)
-            if write_cache:
-                pinfo("Next prompt will be cached.\n")
 
         # Start a background task to auto-name the session if it is not already named
         if session_name is None:

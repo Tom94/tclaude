@@ -19,14 +19,24 @@ import asyncio
 import json
 import mimetypes
 import os
-from typing import cast
+from typing import Mapping, cast
 
 import aiofiles
 import aiohttp
-from aiofiles.threadpool.binary import AsyncBufferedReader
 
 from . import endpoints
 from .json import JSON, get, get_or
+
+MAX_FILE_LIST = 1000
+
+
+def mime_type_to_content_block_type(mime_type: str) -> str | None:
+    if mime_type.startswith("image/"):
+        return "image"
+    elif mime_type.startswith("application/pdf") or mime_type.startswith("text/plain"):
+        return "document"
+    else:
+        return None
 
 
 async def list_files(session: aiohttp.ClientSession, after_file_id: str | None, num_files: int = 50) -> JSON:
@@ -69,13 +79,10 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
             file_data = await file.read()
 
         mime_type, content_encoding = mimetypes.guess_file_type(file_path)
-        if mime_type is not None:
-            print(f"Detected content encoding for {file_path}: {content_encoding}")
-        else:
+        if mime_type is None:
             mime_type = "application/octet-stream"
 
         if content_encoding is not None:
-            print(f"Detected content encoding for {file_path}: {content_encoding}")
             headers["Content-Encoding"] = content_encoding
 
         form_data = aiohttp.FormData()
@@ -107,6 +114,15 @@ async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> JSO
         raise FileNotFoundError(f"Failed to get metadata for file {file_id}: {e.message}") from e
 
     return data
+
+async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> JSON | None:
+    """
+    Get file metadata, returning None if the file does not exist.
+    """
+    try:
+        return await get_file_metadata(session, file_id)
+    except FileNotFoundError:
+        return None
 
 
 def get_path_from_metadata(file_id: str, metadata: JSON) -> str:
@@ -198,6 +214,12 @@ async def async_main():
             if not args.files:
                 print("No files specified to remove.")
                 return
+
+            if "all" in args.files:
+                files = await list_files(session, None, MAX_FILE_LIST)
+                data = get(files, "data", list[JSON])
+                if data:
+                    args.files = [str(file["id"]) for file in data if isinstance(file, Mapping) and "id" in file]
 
             rm_tasks: list[asyncio.Task[JSON]] = []
             async with asyncio.TaskGroup() as tg:

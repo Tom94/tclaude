@@ -222,13 +222,15 @@ class TaiArgs(argparse.Namespace):
             default_role = None
 
         self.input: list[str]
+
+        self.file: list[str] = []
+        self.max_tokens: int = 2**14  # 16k tokens
+        self.model: str = "claude-sonnet-4-0"
+        self.no_code_execution: bool = False
+        self.no_web_search: bool = False
+        self.role: str | None = default_role
         self.session: str | None = None
         self.sessions_dir: str = default_sessions_dir()
-        self.role: str | None = default_role
-        self.model: str = "claude-sonnet-4-0"
-        self.max_tokens: int = 2**14  # 16k tokens
-        self.no_web_search: bool = False
-        self.no_code_execution: bool = False
         self.thinking: bool = False
         self.thinking_budget: int | None = None
         self.verbose: bool = False
@@ -238,13 +240,15 @@ class TaiArgs(argparse.Namespace):
 def parse_tai_args():
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     _ = parser.add_argument("input", nargs="*", help="Input text to send to Claude")
+
+    _ = parser.add_argument("-f", "--file", action="append", help="Path to a file that should be sent to Claude as input")
+    _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response")
+    _ = parser.add_argument("-m", "--model", help="Anthropic model to use")
+    _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
+    _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
+    _ = parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
     _ = parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     _ = parser.add_argument("--sessions-dir", help="Path to directory for session files")
-    _ = parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt")
-    _ = parser.add_argument("-m", "--model", help="Anthropic model to use")
-    _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response")
-    _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
-    _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
     _ = parser.add_argument("--thinking-budget", help="Number of tokens to allocate for thinking (min 1024)")
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")

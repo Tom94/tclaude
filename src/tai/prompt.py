@@ -482,7 +482,6 @@ async def async_main():
     if args.role:
         system_prompt = common.load_system_prompt(args.role)
 
-    # The response is already printed during streaming, so we don't need to print it again
     history: History = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
 
     async with aiohttp.ClientSession() as session:

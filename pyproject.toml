@@ -16,6 +16,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "GPL-3.0-only"}
 dependencies = [
+    "aiofiles",
     "aiohttp",
     "beautifulsoup4",
     "html2text",

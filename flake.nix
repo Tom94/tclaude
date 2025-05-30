@@ -15,6 +15,7 @@
 
         # Define your Python dependencies here
         pythonDeps = with pythonPackages; [
+          aiofiles
           aiohttp
           beautifulsoup4
           html2text

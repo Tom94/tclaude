@@ -19,8 +19,6 @@ import contextlib
 import importlib
 import inspect
 import json
-import os
-import subprocess
 import sys
 from collections.abc import AsyncGenerator
 from io import StringIO
@@ -29,7 +27,7 @@ from typing import Callable, cast
 import aiohttp
 from partial_json_parser import loads as partial_loads
 
-from . import common
+from . import common, endpoints
 from .common import History, pplain
 from .json import JSON, get, get_or, get_or_default
 from .print import history_to_string
@@ -38,12 +36,6 @@ from .print import history_to_string
 MAX_SEARCH_USES = 5
 ALLOWED_DOMAINS = None  # Example: ["example.com", "trusteddomain.org"]
 BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
-
-# Anthropic API configuration
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-VERTEX_API_KEY = os.getenv("VERTEX_API_KEY")
-VERTEX_API_PROJECT = os.getenv("VERTEX_API_PROJECT")
 
 
 def get_available_tools() -> dict[str, Callable[[object], object]]:
@@ -220,50 +212,6 @@ class TokenCounter:
         )
 
 
-def get_gcp_access_token() -> str:
-    cmd = ["gcloud", "auth", "print-access-token"]
-    token = subprocess.check_output(cmd).decode("utf-8").strip()
-    return token
-
-
-def get_endpoint_vertex(model: str) -> tuple[str, dict[str, str], dict[str, JSON]]:
-    if not VERTEX_API_PROJECT:
-        raise ValueError("VERTEX_API_PROJECT environment variable must be set")
-
-    # Prepare headers
-    headers = {
-        "Authorization": f"Bearer {get_gcp_access_token()}",
-        "Content-Type": "application/json",
-    }
-
-    url = f"https://aiplatform.googleapis.com/v1/projects/{VERTEX_API_PROJECT}/locations/global/publishers/anthropic/models/{model}:streamRawPredict"
-    params: dict[str, JSON] = {
-        "anthropic_version": "vertex-2023-10-16",
-    }
-
-    return url, headers, params
-
-
-def get_endpoint_anthropic(model: str) -> tuple[str, dict[str, str], dict[str, JSON]]:
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY environment variable must be set")
-
-    # Prepare headers
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14",
-    }
-
-    url = "https://api.anthropic.com/v1/messages"
-    params: dict[str, JSON] = {
-        "model": model,
-    }
-
-    return url, headers, params
-
-
 async def stream_events(url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=params) as response:
@@ -302,8 +250,8 @@ async def stream_response(
         enable_thinking = False
         max_tokens = min(max_tokens, 8192)
 
-    url, headers, params = get_endpoint_anthropic(model)
-    # url, headers, params = get_endpoint_vertex("claude-sonnet-4@20250514")
+    url, headers, params = endpoints.get_messages_endpoint_anthropic(model)
+    # url, headers, params = endpoints.get_messages_endpoint_vertex("claude-sonnet-4@20250514")
 
     if write_cache:
         # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use

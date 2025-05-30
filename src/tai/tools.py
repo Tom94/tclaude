@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # tai -- Terminal AI
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>

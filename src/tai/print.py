@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # tai -- Terminal AI
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
@@ -76,15 +74,6 @@ def write_result_block(heading: str, block_text: str, io: StringIO, pretty: bool
 
 def write_error_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
     write_block(heading, block_text, io, pretty, color="0;91m", wrap_width=wrap_width)
-
-
-def format_python_code(code: str) -> str:
-    lines = code.splitlines()
-    formatted_lines: list[str] = []
-    for line in lines:
-        # Replace tabs with 4 spaces
-        formatted_lines.append(line.replace("\t", " " * 4))
-    return "\n".join(formatted_lines)
 
 
 def gather_tool_results(messages: History) -> dict[str, JSON]:
@@ -351,8 +340,6 @@ def main():
     _ = parser.add_argument("-p", "--pretty", action="store_true", help="Pretty print the conversation history using bat")
 
     args = parser.parse_args(namespace=PrintArgs())
-
-    print(args.sessions_dir)
 
     # Load the history from the JSON file
     try:

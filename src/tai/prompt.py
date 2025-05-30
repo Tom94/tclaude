@@ -400,30 +400,22 @@ async def stream_response(
 
                 if delta_type == "thinking_delta":
                     thinking_delta = get_or(delta, "thinking", "")
-                    if "thinking" not in content[index] or not isinstance(content[index]["thinking"], str):
-                        content[index]["thinking"] = ""
-                    thinking = cast(str, content[index]["thinking"])
+                    thinking = cast(str, content[index].setdefault("thinking", ""))
                     content[index]["thinking"] = thinking + thinking_delta
 
                 if delta_type == "signature_delta":
                     signature_delta = get_or(delta, "signature", "")
-                    if "signature" not in content[index] or not isinstance(content[index]["signature"], str):
-                        content[index]["signature"] = ""
-                    signature = cast(str, content[index]["signature"])
+                    signature = cast(str, content[index].setdefault("signature", ""))
                     content[index]["signature"] = signature + signature_delta
 
                 elif delta_type == "text_delta":
                     text_delta = get_or(delta, "text", "")
-                    if "text" not in content[index] or not isinstance(content[index]["text"], str):
-                        content[index]["text"] = ""
-                    text = cast(str, content[index]["text"])
+                    text = cast(str, content[index].setdefault("text", ""))
                     content[index]["text"] = text + text_delta
 
                 elif delta_type == "citations_delta":
                     citation = get_or(delta, "citation", {})
-                    if "citations" not in content[index] or not isinstance(content[index]["citations"], list):
-                        content[index]["citations"] = []
-                    citations = cast(list[JSON], content[index]["citations"])
+                    citations = cast(list[JSON], content[index].setdefault("citations", []))
                     citations.append(citation)
 
                 elif delta_type == "input_json_delta":

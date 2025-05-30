@@ -20,6 +20,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from io import StringIO
+from itertools import groupby
 
 from . import common
 from .common import History, wrap_style
@@ -189,12 +190,14 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
 def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: int, skip_user_text: bool):
     prompt = f"{common.CHEVRON} "
 
+    files: dict[str, str] = {}
+
     for content_block in get_or_default(message, "content", list[JSON]):
-        kind = get(content_block, "type", str)
-        if kind is None or kind == "tool_result":
+        type = get(content_block, "type", str)
+        if type is None or type == "tool_result":
             continue  # Tool results are handled in their `tool_use` block, not the result block
 
-        if kind == "text":
+        if type == "text":
             if skip_user_text:
                 continue
 
@@ -204,9 +207,40 @@ def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: in
                 input = common.input_style(input)
 
             _ = io.write(f"{prompt}{input}\n")
+
+        elif type in ("document", "image"):
+            source = get_or_default(content_block, "source", dict[str, JSON])
+            file_id = get(source, "file_id", str)
+            if file_id is not None:
+                files[file_id] = type
+
+        elif type == "container_upload":
+            file_id = get(content_block, "file_id", str)
+            # Record container uploads only if their ID isn't already in the files dict. This can happen, at which point we have more
+            # precise knowledge about the file type already.
+            if file_id is not None and not file_id in files:
+                files[file_id] = type
+
         else:
-            write_result_block(f"user `{kind}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
+            write_result_block(f"user `{type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
             _ = io.write("\n\n")
+
+    if files:
+        files_io = StringIO()
+
+        for key, group in groupby(sorted(files.items()), key=lambda x: x[1]):
+            names = {
+                "image": "Images",
+                "document": "Documents",
+                "container_upload": "Others",
+            }
+
+            _ = files_io.write(f"{names[key]}:\n")
+            for file_id, _ in group:
+                _ = files_io.write(f"  - {file_id}\n")
+
+        write_result_block("Files", files_io.getvalue(), io, pretty, wrap_width)
+        _ = io.write("\n\n")
 
 
 def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int):

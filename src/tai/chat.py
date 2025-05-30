@@ -202,7 +202,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
             type = get(content_block, "type", str)
             if type == "text":
                 prompt_session.history.append_string(get_or(content_block, "text", ""))
-            elif type == "document" or type == "image":
+            elif type in ("document", "image"):
                 source = get_or_default(content_block, "source", dict[str, JSON])
                 file_id = get(source, "file_id", str)
                 if file_id is not None:

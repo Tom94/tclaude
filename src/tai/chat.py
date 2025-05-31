@@ -150,6 +150,7 @@ def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str
     Erase all content blocks in the history that have no entry in `uploaded_files`. This is useful when we want to remove file references
     from the history after verifying or processing them.
     """
+
     def is_valid_block(block: JSON) -> bool:
         match block:
             case {"type": "container_upload", "file_id": file_id}:
@@ -218,7 +219,13 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
     if type is None:
         return content
 
-    content.append({"type": type, "source": {"type": "file", "file_id": id}})
+    info: dict[str, JSON] = {"type": type, "source": {"type": "file", "file_id": id}}
+    if type == "document":
+        info["context"] = "This document was uploaded by the user."
+        info["citations"] = {"enabled": True}
+        info["title"] = get_or(metadata, "filename", id)
+
+    content.append(info)
     return content
 
 

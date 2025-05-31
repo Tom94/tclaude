@@ -23,7 +23,7 @@ from io import StringIO
 from itertools import groupby
 
 from . import common
-from .common import History, wrap_style
+from .common import History, pwarning, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
 
@@ -243,6 +243,10 @@ def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: in
         _ = io.write("\n\n")
 
 
+def escape(text: str) -> str:
+    return repr(text.strip().replace("\n", " ").replace("\r", "").replace("\t", " "))
+
+
 def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int):
     @dataclass(frozen=True)
     class Reference:
@@ -251,6 +255,9 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
         cited_texts: set[str]
 
     references: dict[str, Reference] = {}
+
+    def get_reference(key: str, title: str) -> Reference:
+        return references.setdefault(key, Reference(id=len(references) + 1, title=title, cited_texts=set()))
 
     content_blocks = get_or_default(message, "content", list[JSON])
 
@@ -274,22 +281,31 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
                 superscripts: set[str] = set()
                 citations = get_or_default(content_block, "citations", list[dict[str, JSON]])
                 for citation in citations:
-                    if get(citation, "type", str) != "web_search_result_location":
-                        continue
-                    url = get(citation, "url", str)
-                    if url is None:
-                        continue
+                    match citation:
+                        case {"type": "web_search_result_location", "url": str(url), "cited_text": str(cited_text)}:
+                            title = url
+                            page_title = get(citation, "title", str)
+                            if page_title:
+                                title += f" ({page_title})"
 
-                    if not url in references:
-                        references[url] = Reference(
-                            id=len(references) + 1,
-                            title=get_or(citation, "title", ""),
-                            cited_texts=set(),
-                        )
-
-                    reference = references[url]
-                    if "cited_text" in citation:
-                        reference.cited_texts.add(str(citation["cited_text"]))
+                            reference = get_reference(url, title)
+                            reference.cited_texts.add(f"{escape(cited_text)}")
+                            superscripts.add(str(reference.id))
+                        case {
+                            "type": "page_location",
+                            "document_title": str(title),
+                            "cited_text": str(cited_text),
+                            "start_page_number": int(start_page_number),
+                            "end_page_number": int(end_page_number),
+                        }:
+                            reference = get_reference(title, title)
+                            end_page_number_incl = end_page_number - 1
+                            if start_page_number == end_page_number_incl:
+                                reference.cited_texts.add(f"Page {start_page_number}: {escape(cited_text)}")
+                            else:
+                                reference.cited_texts.add(f"Pages {start_page_number}-{end_page_number_incl}: {escape(cited_text)}")
+                        case _:
+                            reference = get_reference(get_or(citation, "type", "<unknown>"), "<unknown>")
 
                     superscripts.add(str(reference.id))
 
@@ -319,9 +335,9 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
         if references:
             references_io = StringIO()
             for k, v in sorted(references.items(), key=lambda x: x[1].id):
-                _ = references_io.write(f"{to_superscript(v.id)} {k} - {v.title}\n")
+                _ = references_io.write(f"{to_superscript(v.id)} {v.title}\n")
                 for val in sorted(v.cited_texts):
-                    _ = references_io.write(f'   "{val}"\n')
+                    _ = references_io.write(f"   {val}\n")
             write_result_block("References", references_io.getvalue(), io, pretty, wrap_width)
             _ = io.write("\n")
 

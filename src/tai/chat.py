@@ -87,6 +87,8 @@ def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
                     "source": {"file_id": str(file_id)},
                 }:
                     uploaded_files[file_id] = {}
+                case {"type": "tool_result"}:
+                    pass
                 case _:
                     pwarning(f"Unknown content block type in user message: {content_block}")
 
@@ -154,10 +156,7 @@ def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str
                 return file_id in uploaded_files
             case {"type": "document" | "image", "source": {"file_id": file_id}}:
                 return file_id in uploaded_files
-            case {"type": "text", "text": str(text)}:
-                return True
-            case _:
-                pwarning(f"Unknown content block type in user message: {block}")
+            case _:  # Other block types, like text or tool use are always valid
                 return True
 
     for message in history:

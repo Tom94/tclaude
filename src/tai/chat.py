@@ -50,6 +50,84 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
+def deduce_session_name(session_file: str | None) -> str | None:
+    """
+    Deduce the session name from the command line arguments. If a session file is provided, use its basename. Otherwise, return None.
+    """
+    if session_file:
+        session_name = os.path.basename(session_file)
+        stem, ext = os.path.splitext(session_name)
+        if ext.lower() == ".json":
+            return stem
+        return session_name
+
+    return None
+
+
+def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
+    """
+    Process the initial history to extract user messages and uploaded files.
+    Returns a tuple of:
+    - A list of user messages as strings.
+    - A dictionary of uploaded files with their file IDs as keys and metadata as values.
+    """
+    user_messages: list[str] = []
+    uploaded_files: dict[str, JSON] = {}
+
+    for message in history:
+        if get(message, "role", str) != "user":
+            continue
+
+        for content_block in get_or_default(message, "content", list[JSON]):
+            type = get(content_block, "type", str)
+            if type == "text":
+                user_messages.append(get_or(content_block, "text", ""))
+            elif type in ("document", "image"):
+                source = get_or_default(content_block, "source", dict[str, JSON])
+                file_id = get(source, "file_id", str)
+                if file_id is not None:
+                    uploaded_files[file_id] = {}
+            elif type == "container_upload":
+                file_id = get(content_block, "file_id", str)
+                if file_id is not None:
+                    uploaded_files[file_id] = {}
+
+    return user_messages, uploaded_files
+
+
+def spawn_file_upload_tasks(
+    session: aiohttp.ClientSession, file_paths: list[str], uploaded_files: dict[str, JSON]
+) -> list[asyncio.Task[JSON]]:
+    """
+    Spawn file upload tasks for the given list of files. Returns a list of tasks that will upload the files and create an entry in the
+    provided `uploaded_files` dictionary for each successfully uploaded file.
+    """
+
+    async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
+        """
+        Handle the result of a file upload task. If the task was cancelled, we don't need to do anything. If it completed successfully,
+        we update the uploaded_files dictionary with the file ID.
+        """
+        result = await files.upload_file(session, file_path)
+        file_id = get(result, "id", str)
+        if file_id is not None:
+            uploaded_files[file_id] = result
+            return result
+
+        perror(f"Failed to upload file {file_path}. No file ID returned.")
+        return None
+
+    file_upload_tasks: list[asyncio.Task[JSON]] = []
+    for file in file_paths:
+        if not os.path.isfile(file):
+            perror(f"File {file} does not exist or is not a file.")
+            continue
+
+        file_upload_tasks.append(asyncio.create_task(upload_file(session, file)))
+
+    return file_upload_tasks
+
+
 async def wait_for_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     """
     Wait for all file upload tasks to complete and return the results.
@@ -79,34 +157,29 @@ async def wait_for_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
         return results
 
 
-def erase_file_content_blocks(history: History, file_ids: set[str]) -> None:
+def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str, JSON]) -> None:
     """
-    Erase all content blocks in the history that reference the given file IDs. This is useful when we want to remove file references from
-    the history after verifying or processing them.
+    Erase all content blocks in the history that have no entry in `uploaded_files`. This is useful when we want to remove file references
+    from the history after verifying or processing them.
     """
     for message in history:
         if get(message, "role", str) != "user":
             continue
 
-        content = get_or_default(message, "content", list[JSON])
-        new_content: list[JSON] = []
-        for block in content:
-            if get(block, "type", str) == "container_upload":
-                file_id = get(block, "file_id", str)
-                if file_id is not None and file_id not in file_ids:
-                    new_content.append(block)
-            elif get(block, "type", str) in ("document", "image"):
+        def is_valid_block(block: JSON) -> bool:
+            type = get(block, "type", str)
+            if type == "container_upload":
+                return get(block, "file_id", str) in uploaded_files
+            elif type in ("document", "image"):
                 source = get_or_default(block, "source", dict[str, JSON])
-                file_id = get(source, "file_id", str)
-                if file_id is not None and file_id not in file_ids:
-                    new_content.append(block)
-            else:
-                new_content.append(block)
+                return get(source, "file_id", str) in uploaded_files
+            return True
 
-        message["content"] = new_content
+        content = get_or_default(message, "content", list[JSON])
+        message["content"] = [block for block in content if is_valid_block(block)]
 
 
-def verify_uploaded_files(
+def spawn_file_upload_verification_task(
     session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]
 ) -> asyncio.Future[list[JSON | BaseException]]:
     """
@@ -132,12 +205,12 @@ def verify_uploaded_files(
                         uploaded_files[id] = metadata
 
             # Remove any files that were not found or had an error
-            missing_files = {file_id for file_id, metadata in uploaded_files.items() if not metadata}
+            missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
             for file_id in missing_files:
                 pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
                 del uploaded_files[file_id]
 
-            erase_file_content_blocks(history, set(missing_files))
+            erase_invalid_file_content_blocks(history, uploaded_files)
 
         except asyncio.CancelledError:
             pass
@@ -146,14 +219,14 @@ def verify_uploaded_files(
     return file_upload_verification_task
 
 
-def file_data_to_content(file: JSON) -> list[JSON]:
+def file_metadata_to_content(metadata: JSON) -> list[JSON]:
     """
     Convert a file metadata JSON object to a list of content blocks that can be added to the history.
     """
     content: list[JSON] = []
 
-    type = files.mime_type_to_content_block_type(get_or(file, "mime_type", ""))
-    id = get(file, "id", str)
+    type = files.mime_type_to_content_block_type(get_or(metadata, "mime_type", ""))
+    id = get(metadata, "id", str)
     if id is None:
         return content
 
@@ -169,50 +242,18 @@ def file_data_to_content(file: JSON) -> list[JSON]:
 
 async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
     """
-    Main function to parse arguments, get user input, and print Anthropic's response.
+    Main function to get user input, and print Anthropic's response.
     """
-    # Read system prompt from file if provided
-    system_prompt = None
-    if args.role:
-        system_prompt = common.load_system_prompt(args.role)
+    system_prompt = common.load_system_prompt(args.role) if args.role else None
+    session_name = deduce_session_name(args.session)
 
-    # Deduce session name from the session file if provided
-    session_name = None
-    if args.session:
-        session_name = os.path.basename(args.session)
-
-        # If the session is a json file, the session name is the file name without the extension
-        stem, ext = os.path.splitext(session_name)
-        if ext.lower() == ".json":
-            session_name = stem
-
-    initial_history_length = len(history)
+    user_messages, uploaded_files = process_user_blocks(history)
+    file_upload_verification_task = spawn_file_upload_verification_task(session, history, uploaded_files)
+    file_upload_tasks = spawn_file_upload_tasks(session, args.file, uploaded_files)
 
     prompt_session: PromptSession[str] = PromptSession()
-
-    # Process the initial history to extract various information.
-    # - User messages are appended to the prompt session history.
-    # - File uploads are checked for validity.
-    uploaded_files: dict[str, JSON] = {}
-    for message in history:
-        if get(message, "role", str) != "user":
-            continue
-
-        for content_block in get_or_default(message, "content", list[JSON]):
-            type = get(content_block, "type", str)
-            if type == "text":
-                prompt_session.history.append_string(get_or(content_block, "text", ""))
-            elif type in ("document", "image"):
-                source = get_or_default(content_block, "source", dict[str, JSON])
-                file_id = get(source, "file_id", str)
-                if file_id is not None:
-                    uploaded_files[file_id] = {}
-            elif type == "container_upload":
-                file_id = get(content_block, "file_id", str)
-                if file_id is not None:
-                    uploaded_files[file_id] = {}
-
-    file_upload_verification_task = verify_uploaded_files(session, history, uploaded_files)
+    for m in user_messages:
+        prompt_session.history.append_string(m)
 
     if user_input:
         prompt_session.history.append_string(user_input)
@@ -228,28 +269,6 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         return current_message if current_message else f"{spinner()} "
 
     autoname_task: asyncio.Task[Response] | None = None
-
-    def handle_file_upload_result(file_upload_task: asyncio.Task[JSON]):
-        """
-        Handle the result of a file upload task. If the task was cancelled, we don't need to do anything. If it completed successfully,
-        we update the uploaded_files dictionary with the file ID.
-        """
-        try:
-            result = file_upload_task.result()
-            file_id = get(result, "id", str)
-            if file_id is not None:
-                uploaded_files[file_id] = result
-        except asyncio.CancelledError:
-            pass
-
-    file_upload_tasks: list[asyncio.Task[JSON]] = []
-    for file in args.file:
-        if not os.path.isfile(file):
-            perror(f"File {file} does not exist or is not a file.")
-            continue
-
-        file_upload_tasks.append(asyncio.create_task(files.upload_file(session, file)))
-        file_upload_tasks[-1].add_done_callback(handle_file_upload_result)
 
     def lprompt(prefix: str) -> str:
         return f"{prefix}{common.prompt_style(common.CHEVRON)} "
@@ -274,7 +293,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
         if num_uploaded_files < num_total_files:
             rprompt = f" {num_uploaded_files}/{num_total_files} files {spinner()}  {rprompt}"
-        elif file_upload_tasks:
+        elif num_uploaded_files > 0:
             rprompt = f" {num_uploaded_files} files  {rprompt}"
 
         return f"{prefix}{rprompt}"
@@ -309,7 +328,11 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                     continue
 
             content: list[JSON] = [{"type": "text", "text": user_input}]
-            content.extend(chain.from_iterable(file_data_to_content(file) for file in await wait_for_file_uploads(file_upload_tasks)))
+            content.extend(
+                chain.from_iterable(
+                    file_metadata_to_content(metadata) for metadata in await wait_for_file_uploads(file_upload_tasks) if metadata
+                )
+            )
             file_upload_tasks.clear()
 
             history.append({"role": "user", "content": content})
@@ -423,8 +446,8 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
     pplain()
 
-    # If we submitted a user prompt and received a response (at least 2 messages), save the session.
-    if len(history) - initial_history_length >= 2:
+    # If we received at least one response
+    if response is not None:
         # To obtain the path to save to, we follow these rules:
         # 1. If no session name is provided but an autoname task is running, wait for that.
         # 2. If the path does not end with .json, we append .json.

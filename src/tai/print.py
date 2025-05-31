@@ -17,13 +17,15 @@
 import argparse
 import json
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from io import StringIO
 from itertools import groupby
+from typing import cast
+
+from humanize import naturalsize
 
 from . import common
-from .common import History, pwarning, wrap_style
+from .common import History, escape, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
 
@@ -187,47 +189,36 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
         write_tool_result(tool_use, tool_result, io, pretty, wrap_width)
 
 
-def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: int, skip_user_text: bool):
+def write_user_message(
+    message: JSON, io: StringIO, pretty: bool, wrap_width: int, skip_user_text: bool, uploaded_files: dict[str, JSON] | None
+):
     prompt = f"{common.CHEVRON} "
+    if pretty:
+        prompt = common.prompt_style(prompt)
 
     files: dict[str, str] = {}
 
     for content_block in get_or_default(message, "content", list[JSON]):
-        type = get(content_block, "type", str)
-        if type is None or type == "tool_result":
-            continue  # Tool results are handled in their `tool_use` block, not the result block
-
-        if type == "text":
-            if skip_user_text:
-                continue
-
-            input = get_or(content_block, "text", "")
-            if pretty:
-                prompt = common.prompt_style(prompt)
-                input = common.input_style(input)
-
-            _ = io.write(f"{prompt}{input}\n")
-
-        elif type in ("document", "image"):
-            source = get_or_default(content_block, "source", dict[str, JSON])
-            file_id = get(source, "file_id", str)
-            if file_id is not None:
-                files[file_id] = type
-
-        elif type == "container_upload":
-            file_id = get(content_block, "file_id", str)
-            # Record container uploads only if their ID isn't already in the files dict. This can happen, at which point we have more
-            # precise knowledge about the file type already.
-            if file_id is not None and not file_id in files:
-                files[file_id] = type
-
-        else:
-            write_result_block(f"user `{type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
-            _ = io.write("\n\n")
+        match content_block:
+            case {"type": "text", "text": str(input)}:
+                if not skip_user_text:
+                    _ = io.write(f"{prompt}{common.input_style(input) if pretty else input}\n")
+            case {"type": "document" | "image", "source": {"file_id": str(file_id)}}:
+                files[file_id] = cast(str, content_block["type"])  # We know this is a str because of the match case
+            case {"type": "container_upload", "file_id": str(file_id)}:
+                # Record container uploads only if their ID isn't already in the files dict. This can happen, at which point we have more
+                # precise knowledge about the file type already.
+                if not file_id in files:
+                    files[file_id] = "container_upload"
+            case {"type": "tool_result"}:
+                pass  # Tool results are handled in the assistant message's tool_use block
+            case _:
+                type = get_or(content_block, "type", "<unknown>")
+                write_result_block(f"user `{type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
+                _ = io.write("\n\n")
 
     if files:
         files_io = StringIO()
-
         for key, group in groupby(sorted(files.items()), key=lambda x: x[1]):
             names = {
                 "image": "Images",
@@ -237,14 +228,16 @@ def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: in
 
             _ = files_io.write(f"{names[key]}:\n")
             for file_id, _ in group:
-                _ = files_io.write(f"- {file_id}\n")
+                if uploaded_files is not None and file_id in uploaded_files:
+                    file_name = get_or(uploaded_files[file_id], "filename", "<unknown>")
+                    num_bytes = get_or(uploaded_files[file_id], "size_bytes", 0)
+                    _ = files_io.write(f"- {file_name}, {naturalsize(num_bytes)} ({file_id})\n")
+                else:
+                    # If we don't have the file metadata, just use the ID
+                    _ = files_io.write(f"- {file_id}\n")
 
         write_result_block("Files", files_io.getvalue(), io, pretty, wrap_width)
         _ = io.write("\n\n")
-
-
-def escape(text: str) -> str:
-    return repr(text.strip().replace("\n", " ").replace("\r", "").replace("\t", " "))
 
 
 def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int):
@@ -345,7 +338,9 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
             _ = io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
-def history_to_string(history: History, pretty: bool, wrap_width: int = 0, skip_user_text: bool = False) -> str:
+def history_to_string(
+    history: History, pretty: bool, wrap_width: int = 0, skip_user_text: bool = False, uploaded_files: dict[str, JSON] | None = None
+) -> str:
     tool_results = gather_tool_results(history)
 
     io = StringIO()
@@ -354,7 +349,7 @@ def history_to_string(history: History, pretty: bool, wrap_width: int = 0, skip_
         if role == "system":
             write_system_message(message, io)
         elif role == "user":
-            write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text)
+            write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text, uploaded_files=uploaded_files)
         elif role == "assistant":
             write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width)
 

@@ -271,7 +271,9 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
     total_tokens = TokenCounter()
 
     def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
-        return history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text)
+        return history_to_string(
+            messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=uploaded_files
+        )
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
     def history_or_spinner(messages: History):

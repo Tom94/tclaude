@@ -19,6 +19,7 @@
           aiohttp
           beautifulsoup4
           html2text
+          humanize
           partial-json-parser
           prompt_toolkit
           wcwidth

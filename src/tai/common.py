@@ -58,6 +58,10 @@ def input_style(msg: str) -> str:
     return wrap_style(msg, "1m")  # bold
 
 
+def escape(text: str) -> str:
+    return repr(text.strip().replace("\n", " ").replace("\r", "").replace("\t", " "))
+
+
 def pplain(
     *values: object,
     sep: str | None = " ",

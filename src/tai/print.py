@@ -165,8 +165,8 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
     input = get_or_default(tool_use, "input", dict[str, JSON])
     if name == "web_search":
         query = get_or(input, "query", "<unknown>")
-        title = "Web search"
         text = f"Query: {query}"
+        title = "Web search"
     elif name == "code_execution":
         # It's always Python, see https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
         language = "python"
@@ -175,7 +175,6 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
     else:
         language = "json"
         text = json.dumps(input, indent=2, sort_keys=True)
-        title = f"Server tool `{name}`"
 
     # The -2 accounts for the "╭─" and "╰─" indentation
     text = common.word_wrap(text, wrap_width - 2)

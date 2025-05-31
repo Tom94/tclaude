@@ -420,6 +420,28 @@ async def stream_response(
             if on_response_update is not None:
                 on_response_update(Response(messages=messages, tokens=tokens, call_again=False))
 
+    # Strangely, Anthropic's API sometimes returns empty text blocks (usually at the beginning of a message right before its first
+    # citation). Returning these blocks to the API causes bad request errors, so we filter them out. Non-thinking empty blocks are filtered
+    # just in case; I've never seen them in practice.
+    def is_content_block_valid(content_block: JSON) -> bool:
+        match content_block:
+            case (
+                {"type": "thinking", "thinking": ""}
+                | {"type": "signature", "signature": ""}
+                | {"type": "text", "text": ""}
+                | {"type": "citations", "citations": []}
+            ):
+                pwarning(f"Content block {content_block} is empty, removing it.")
+                return False
+            case _:
+                return True
+
+    for message in messages:
+        content_blocks = get_or_default(message, "content", list[dict[str, JSON]])
+        if not content_blocks:
+            pwarning("Message has no content blocks.")
+        message["content"] = [cb for cb in content_blocks if is_content_block_valid(cb)]
+
     stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
     if stop_reason == "pause_turn":
         call_again = True

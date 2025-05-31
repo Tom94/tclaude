@@ -25,7 +25,7 @@ import aiohttp
 from prompt_toolkit import PromptSession
 
 from . import common, files
-from .common import History, TaiArgs, perror, pinfo, pplain, psuccess, pwarning
+from .common import History, TaiArgs, count, perror, pinfo, pplain, psuccess, pwarning
 from .json import JSON, get, get_or, get_or_default
 from .live_print import live_print
 from .print import history_to_string
@@ -128,33 +128,21 @@ def spawn_file_upload_tasks(
     return file_upload_tasks
 
 
-async def wait_for_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
+async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     """
     Wait for all file upload tasks to complete and return the results.
     """
-    if not tasks:
-        return []
+    results: JSON = []
+    for task in asyncio.as_completed(tasks):
+        try:
+            result = await task
+            results.append(result)
+        except aiohttp.ClientError as e:
+            perror(f"Failed to upload file: {e}")
+        except asyncio.CancelledError:
+            perror("File upload cancelled.")
 
-    def download_progress_str() -> str:
-        """
-        Print the progress of file uploads.
-        """
-        completed = sum(1 for task in tasks if task.done())
-        total = len(tasks)
-        return f"[{completed}/{total}] files uploaded {spinner()}"
-
-    async with live_print(download_progress_str, transient=True):
-        results: JSON = []
-        for task in asyncio.as_completed(tasks):
-            try:
-                result = await task
-                results.append(result)
-            except aiohttp.ClientError as e:
-                perror(f"Failed to upload file: {e}")
-            except asyncio.CancelledError:
-                perror("File upload cancelled.")
-
-        return results
+    return results
 
 
 def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str, JSON]) -> None:
@@ -181,42 +169,33 @@ def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str
 
 def spawn_file_upload_verification_task(
     session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]
-) -> asyncio.Future[list[JSON | BaseException]]:
+) -> asyncio.Task[None]:
     """
-    Verify the uploaded files by checking their metadata. Returns a task that will return a list of metadata or exceptions. Modifies the
-    `uploaded_files` dictionary in place to include the metadata for each verified file ID. Non-existent or invalid files will be removed
-    from the dictionary.
+    Spawn a task that verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and
+    have not been removed or corrupted. The task will update the `uploaded_files` dictionary with the metadata of the uploaded files.
     """
-    file_upload_verification_task = asyncio.gather(
-        *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
-    )
 
-    def handle_file_upload_verification(file_upload_verification_task: asyncio.Future[list[JSON | BaseException]]):
-        """
-        Handle the result of the file upload verification task. If the task was cancelled, we don't need to do anything. If it completed
-        successfully, we update the uploaded_files dictionary with the metadata.
-        """
-        try:
-            metadata_list = file_upload_verification_task.result()
-            for metadata in metadata_list:
-                if not isinstance(metadata, BaseException):
-                    id = get_or(metadata, "id", "")
-                    if id in uploaded_files:
-                        uploaded_files[id] = metadata
+    async def file_upload_verification():
+        file_upload_verification_task = asyncio.gather(
+            *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
+        )
 
-            # Remove any files that were not found or had an error
-            missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
-            for file_id in missing_files:
-                pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
-                del uploaded_files[file_id]
+        metadata_list = await file_upload_verification_task
+        for metadata in metadata_list:
+            if not isinstance(metadata, BaseException):
+                id = get_or(metadata, "id", "")
+                if id in uploaded_files:
+                    uploaded_files[id] = metadata
 
-            erase_invalid_file_content_blocks(history, uploaded_files)
+        # Remove any files that were not found or had an error
+        missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
+        for file_id in missing_files:
+            pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
+            del uploaded_files[file_id]
 
-        except asyncio.CancelledError:
-            pass
+        erase_invalid_file_content_blocks(history, uploaded_files)
 
-    file_upload_verification_task.add_done_callback(handle_file_upload_verification)
-    return file_upload_verification_task
+    return asyncio.create_task(file_upload_verification())
 
 
 def file_metadata_to_content(metadata: JSON) -> list[JSON]:
@@ -237,6 +216,27 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
         return content
 
     content.append({"type": type, "source": {"type": "file", "file_id": id}})
+    return content
+
+
+async def build_user_content(
+    user_input: str, file_upload_verification_task: asyncio.Task[None], file_upload_tasks: list[asyncio.Task[JSON]]
+) -> list[JSON]:
+    """
+    Build the user content to be sent to the model. This includes the user input text and any file uploads.
+    """
+    content: list[JSON] = [{"type": "text", "text": user_input}]
+
+    # Ensure file uploads and verifications are done before querying the model.
+    async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
+        await file_upload_verification_task
+
+    async with live_print(lambda: f"[{count(file_upload_tasks, lambda t: t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
+        metadata = await gather_file_uploads(file_upload_tasks)
+    file_upload_tasks.clear()
+
+    content.extend(chain.from_iterable(file_metadata_to_content(m) for m in metadata if m))
+
     return content
 
 
@@ -287,8 +287,9 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         if not file_upload_verification_task.done():
             rprompt = f" verifying files {spinner()}  {rprompt}"
 
-        num_uploaded_files = sum(1 for metadata in uploaded_files.values() if metadata)
-        num_uploading = sum(1 for task in file_upload_tasks if not task.done())
+        num_uploaded_files = count(uploaded_files.values(), lambda m: m is not None)
+        num_uploading = count(file_upload_tasks, lambda task: not task.done())
+
         num_total_files = num_uploaded_files + num_uploading
 
         if num_uploaded_files < num_total_files:
@@ -327,16 +328,10 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                 except KeyboardInterrupt:
                     continue
 
-            content: list[JSON] = [{"type": "text", "text": user_input}]
-            content.extend(
-                chain.from_iterable(
-                    file_metadata_to_content(metadata) for metadata in await wait_for_file_uploads(file_upload_tasks) if metadata
-                )
-            )
-            file_upload_tasks.clear()
-
-            history.append({"role": "user", "content": content})
+            user_content = await build_user_content(user_input, file_upload_verification_task, file_upload_tasks)
             user_input = ""
+
+            history.append({"role": "user", "content": user_content})
 
             # This includes things like file uploads, but *not* the user input text itself, which is already printed in the prompt.
             user_history_string = pretty_history_to_string(history[-1:], skip_user_text=True)

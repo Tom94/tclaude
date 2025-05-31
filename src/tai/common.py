@@ -17,6 +17,7 @@
 import argparse
 import os
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal, TextIO, TypeAlias, cast
@@ -122,6 +123,13 @@ def perror(
     """
     file = file or sys.stderr
     pplain(f"[{ANSI_BOLD_BRIGHT_RED}e{ANSI_MID_GRAY}]", *args, sep=sep, end=end, file=file, flush=flush)
+
+
+def count[T](iterable: Iterable[T], predicate: Callable[[T], bool]) -> int:
+    """
+    Count the number of elements in an iterable that match a predicate.
+    """
+    return sum(1 for item in iterable if predicate(item))
 
 
 def get_config_dir() -> str:

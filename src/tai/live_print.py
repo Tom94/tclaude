@@ -74,12 +74,11 @@ async def live_print(get_live_text: Callable[[], str], transient: bool = True):
             num_newlines_printed = text.count("\n")
 
         async def live_print_task():
-            try:
-                while True:
-                    clear_and_print(final=False)
-                    await asyncio.sleep(1.0 / SPINNER_FPS)
-            except asyncio.CancelledError:
-                pass
+            # Initial wait for 1ms in case the task is already cancelled and nothing has to be printed.
+            await asyncio.sleep(1.0 / 1000.0)
+            while True:
+                clear_and_print(final=False)
+                await asyncio.sleep(1.0 / SPINNER_FPS)
 
         task = asyncio.create_task(live_print_task())
         try:
@@ -88,5 +87,7 @@ async def live_print(get_live_text: Callable[[], str], transient: bool = True):
             _ = task.cancel()
             try:
                 await task
+            except asyncio.CancelledError:
+                pass
             finally:
                 clear_and_print(final=True)

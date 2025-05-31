@@ -396,7 +396,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
             response.tokens.print_cost(args.model)
 
         # Start a background task to auto-name the session if it is not already named
-        if session_name is None:
+        if is_user_turn and session_name is None:
             if autoname_task is None and is_user_turn:
                 autoname_prompt = (
                     "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."

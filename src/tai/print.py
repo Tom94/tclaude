@@ -237,7 +237,7 @@ def write_user_message(message: JSON, io: StringIO, pretty: bool, wrap_width: in
 
             _ = files_io.write(f"{names[key]}:\n")
             for file_id, _ in group:
-                _ = files_io.write(f"  - {file_id}\n")
+                _ = files_io.write(f"- {file_id}\n")
 
         write_result_block("Files", files_io.getvalue(), io, pretty, wrap_width)
         _ = io.write("\n\n")

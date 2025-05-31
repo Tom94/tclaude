@@ -29,7 +29,7 @@ import aiohttp
 from partial_json_parser import loads as partial_loads
 
 from . import common, endpoints
-from .common import History, pplain
+from .common import History, pplain, pwarning
 from .json import JSON, get, get_or, get_or_default
 from .print import history_to_string
 
@@ -340,27 +340,19 @@ async def stream_response(
     # Async generator cleanup: https://www.youtube.com/watch?v=N56Jrqc7SBk
     async with contextlib.aclosing(stream_events(session, url, headers, params)) as events:
         async for data in events:
-            kind = get_or(data, "type", "")
+            match data:
+                # Ping messages are just keep-alive signals, ignore them.
+                case {"type": "ping"}:
+                    continue
 
-            if "message" in kind:
-                # Handle different types of events. During event handling *only* accumulate data. Don't print anything yet.
-                if kind == "message_start":
-                    messages.append(get_or(data, "message", {}))
+                # Message block types
+                case {"type": "message_start", "message": dict(message)}:
+                    messages.append(message)
                     messages[-1]["role"] = "assistant"
                     messages[-1]["content"] = []
-                    tool_use_json = {}  # TODO: handle this more gracefully
-
-                elif kind == "message_delta":
-                    delta = get_or(data, "delta", {})
-                    stop_reason = get(delta, "stop_reason", str)
-                    if stop_reason is not None:
-                        messages[-1]["stop_reason"] = stop_reason
-
-                    container = get(delta, "container", dict[str, JSON])
-                    if container:
-                        messages[-1]["container"] = container
-
-                    usage = get(data, "usage", dict[str, JSON])
+                    tool_use_json = {}
+                case {"type": "message_delta", "delta": dict(delta), **rest}:
+                    usage = get(rest, "usage", dict[str, JSON])
                     if usage:
                         turn_tokens = TokenCounter(
                             cache_creation_input_tokens=get_or(usage, "cache_creation_input_tokens", 0),
@@ -371,67 +363,59 @@ async def stream_response(
 
                         tokens += turn_tokens
 
-                elif kind == "message_end":
+                    stop_reason = get(delta, "stop_reason", str)
+                    if stop_reason is not None:
+                        messages[-1]["stop_reason"] = stop_reason
+
+                    container = get(delta, "container", dict[str, JSON])
+                    if container:
+                        messages[-1]["container"] = container
+                case {"type": "message_end"}:
                     continue
 
-                continue
+                # Content block types
+                case {"type": "content_block_start", "index": int(index), "content_block": dict(new_content_block)}:
+                    content_blocks = get_or_default(messages[-1], "content", list[dict[str, JSON]])
+                    while index >= len(content_blocks):
+                        content_blocks.append({})
+                    content_blocks[index] = new_content_block
+                case {"type": "content_block_delta", "index": int(index), "delta": dict(delta)}:
+                    content_block = get_or_default(messages[-1], "content", list[dict[str, JSON]])[index]
+                    match delta:
+                        case {"type": "thinking_delta", "thinking": str(thinking_delta)}:
+                            thinking = cast(str, content_block.setdefault("thinking", ""))
+                            content_block["thinking"] = thinking + thinking_delta
+                        case {"type": "signature_delta", "signature": str(signature_delta)}:
+                            signature = cast(str, content_block.setdefault("signature", ""))
+                            content_block["signature"] = signature + signature_delta
+                        case {"type": "text_delta", "text": str(text_delta)}:
+                            text = cast(str, content_block.setdefault("text", ""))
+                            content_block["text"] = text + text_delta
+                        case {"type": "citations_delta", "citation": dict(citation)}:
+                            citations = cast(list[JSON], content_block.setdefault("citations", []))
+                            citations.append(citation)
+                        case {"type": "input_json_delta", "partial_json": str(partial_json)}:
+                            if index not in tool_use_json:
+                                tool_use_json[index] = StringIO()
 
-            if not messages:
-                raise ValueError("Content block before message in the response")
+                            tuj = tool_use_json[index]
+                            _ = tuj.write(partial_json)
 
-            content: list[dict[str, JSON]] = get_or(messages[-1], "content", [])
-            if kind == "content_block_start":
-                index = get_or(data, "index", 0)
-                content_block = get_or(data, "content_block", {})
+                            if tuj.tell() > 0:
+                                try:
+                                    content_block["input"] = partial_loads(tuj.getvalue())
+                                except:
+                                    pass
+                        case _:
+                            pwarning(f"Unknown content block delta type: {delta}")
+                case {"type": "content_block_stop", "index": int(index)}:
+                    content_block = get_or_default(messages[-1], "content", list[dict[str, JSON]])[index]
+                    pass  # Content block stop is just a signal that the content block is complete.
 
-                while index >= len(content):
-                    content.append({})
-
-                content[index] = content_block
-
-            elif kind == "content_block_delta":
-                index = get_or(data, "index", 0)
-
-                if index >= len(content):
-                    raise ValueError(f"Index {index} out of range for content list")
-
-                delta = get_or(data, "delta", {})
-                delta_type = delta.get("type")
-
-                if delta_type == "thinking_delta":
-                    thinking_delta = get_or(delta, "thinking", "")
-                    thinking = cast(str, content[index].setdefault("thinking", ""))
-                    content[index]["thinking"] = thinking + thinking_delta
-
-                if delta_type == "signature_delta":
-                    signature_delta = get_or(delta, "signature", "")
-                    signature = cast(str, content[index].setdefault("signature", ""))
-                    content[index]["signature"] = signature + signature_delta
-
-                elif delta_type == "text_delta":
-                    text_delta = get_or(delta, "text", "")
-                    text = cast(str, content[index].setdefault("text", ""))
-                    content[index]["text"] = text + text_delta
-
-                elif delta_type == "citations_delta":
-                    citation = get_or(delta, "citation", {})
-                    citations = cast(list[JSON], content[index].setdefault("citations", []))
-                    citations.append(citation)
-
-                elif delta_type == "input_json_delta":
-                    partial_json = get_or(delta, "partial_json", "")
-
-                    if index not in tool_use_json:
-                        tool_use_json[index] = StringIO()
-
-                    tuj = tool_use_json[index]
-                    _ = tuj.write(partial_json)
-
-                    if tuj.tell() > 0:
-                        try:
-                            content[index]["input"] = partial_loads(tuj.getvalue())
-                        except:
-                            pass
+                # Something unexpected
+                case _:
+                    if not "message" in get_or(data, "type", ""):
+                        pwarning(f"Unknown message type: {data}")
 
             if on_response_update is not None:
                 on_response_update(Response(messages=messages, tokens=tokens, call_again=False))

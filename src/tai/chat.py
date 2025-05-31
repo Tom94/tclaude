@@ -79,18 +79,16 @@ def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
             continue
 
         for content_block in get_or_default(message, "content", list[JSON]):
-            type = get(content_block, "type", str)
-            if type == "text":
-                user_messages.append(get_or(content_block, "text", ""))
-            elif type in ("document", "image"):
-                source = get_or_default(content_block, "source", dict[str, JSON])
-                file_id = get(source, "file_id", str)
-                if file_id is not None:
+            match content_block:
+                case {"type": "text", "text": str(text)}:
+                    user_messages.append(text)
+                case {"type": "container_upload", "file_id": str(file_id)} | {
+                    "type": "document" | "image",
+                    "source": {"file_id": str(file_id)},
+                }:
                     uploaded_files[file_id] = {}
-            elif type == "container_upload":
-                file_id = get(content_block, "file_id", str)
-                if file_id is not None:
-                    uploaded_files[file_id] = {}
+                case _:
+                    pwarning(f"Unknown content block type in user message: {content_block}")
 
     return user_messages, uploaded_files
 
@@ -150,18 +148,21 @@ def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str
     Erase all content blocks in the history that have no entry in `uploaded_files`. This is useful when we want to remove file references
     from the history after verifying or processing them.
     """
+    def is_valid_block(block: JSON) -> bool:
+        match block:
+            case {"type": "container_upload", "file_id": file_id}:
+                return file_id in uploaded_files
+            case {"type": "document" | "image", "source": {"file_id": file_id}}:
+                return file_id in uploaded_files
+            case {"type": "text", "text": str(text)}:
+                return True
+            case _:
+                pwarning(f"Unknown content block type in user message: {block}")
+                return True
+
     for message in history:
         if get(message, "role", str) != "user":
             continue
-
-        def is_valid_block(block: JSON) -> bool:
-            type = get(block, "type", str)
-            if type == "container_upload":
-                return get(block, "file_id", str) in uploaded_files
-            elif type in ("document", "image"):
-                source = get_or_default(block, "source", dict[str, JSON])
-                return get(source, "file_id", str) in uploaded_files
-            return True
 
         content = get_or_default(message, "content", list[JSON])
         message["content"] = [block for block in content if is_valid_block(block)]
@@ -182,10 +183,13 @@ def spawn_file_upload_verification_task(
 
         metadata_list = await file_upload_verification_task
         for metadata in metadata_list:
-            if not isinstance(metadata, BaseException):
-                id = get_or(metadata, "id", "")
-                if id in uploaded_files:
-                    uploaded_files[id] = metadata
+            match metadata:
+                case {"id": str(file_id)}:
+                    uploaded_files[file_id] = metadata
+                case BaseException() as e:
+                    perror(f"Failed to verify file upload: {e}")
+                case _:
+                    pwarning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
 
         # Remove any files that were not found or had an error
         missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
@@ -300,6 +304,10 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         return f"{prefix}{rprompt}"
 
     stream_task: asyncio.Task[Response] | None = None
+
+    # Not every request is going to be a user turn (where the user inputs text into a prompt). For example, if the response was paused
+    # before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use"), it isn't the user's turn, but we
+    # still need to make a request to the model to continue the conversation. This is what this variable is for.
     is_user_turn = True
 
     # Our repl session is meant to resemble a shell, hence we don't want Ctrl-C to exit but rather cancel the current response, which
@@ -317,7 +325,6 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
     _ = signal.signal(signal.SIGINT, interrupt_handler)
 
     response: Response | None = None
-
     while True:
         if is_user_turn:
             if not user_input:
@@ -337,9 +344,6 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
             user_history_string = pretty_history_to_string(history[-1:], skip_user_text=True)
             if user_history_string:
                 print(user_history_string, end="\n\n")
-        else:
-            # Either, the response was paused before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use").
-            pass
 
         container = common.get_latest_container(history)
         write_cache = should_cache(response.tokens, args.model) if response is not None else False
@@ -453,6 +457,8 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                 if not autoname_task.done():
                     _ = autoname_task.cancel()
                 await autoname_task
+            except aiohttp.ClientError as e:
+                pass
             except asyncio.CancelledError:
                 pass
 

@@ -25,7 +25,7 @@ import aiohttp
 from prompt_toolkit import PromptSession
 
 from . import common, files
-from .common import History, TaiArgs, count, perror, pinfo, pplain, psuccess, pwarning
+from .common import History, TaiArgs, perror, pinfo, pplain, psuccess, pwarning
 from .json import JSON, get, get_or, get_or_default
 from .live_print import live_print
 from .print import history_to_string
@@ -168,38 +168,32 @@ def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str
         message["content"] = [block for block in content if is_valid_block(block)]
 
 
-def spawn_file_upload_verification_task(
-    session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]
-) -> asyncio.Task[None]:
+async def verify_file_uploads(session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]):
     """
-    Spawn a task that verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and
-    have not been removed or corrupted. The task will update the `uploaded_files` dictionary with the metadata of the uploaded files.
+    Verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and have not been
+    removed or corrupted. The updates the `uploaded_files` dictionary with the metadata of the uploaded files.
     """
+    file_upload_verification_task = asyncio.gather(
+        *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
+    )
 
-    async def file_upload_verification():
-        file_upload_verification_task = asyncio.gather(
-            *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
-        )
+    metadata_list = await file_upload_verification_task
+    for metadata in metadata_list:
+        match metadata:
+            case {"id": str(file_id)}:
+                uploaded_files[file_id] = metadata
+            case BaseException() as e:
+                perror(f"Failed to verify file upload: {e}")
+            case _:
+                pwarning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
 
-        metadata_list = await file_upload_verification_task
-        for metadata in metadata_list:
-            match metadata:
-                case {"id": str(file_id)}:
-                    uploaded_files[file_id] = metadata
-                case BaseException() as e:
-                    perror(f"Failed to verify file upload: {e}")
-                case _:
-                    pwarning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
+    # Remove any files that were not found or had an error
+    missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
+    for file_id in missing_files:
+        pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
+        del uploaded_files[file_id]
 
-        # Remove any files that were not found or had an error
-        missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
-        for file_id in missing_files:
-            pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
-            del uploaded_files[file_id]
-
-        erase_invalid_file_content_blocks(history, uploaded_files)
-
-    return asyncio.create_task(file_upload_verification())
+    erase_invalid_file_content_blocks(history, uploaded_files)
 
 
 def file_metadata_to_content(metadata: JSON) -> list[JSON]:
@@ -230,7 +224,7 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
 
 
 async def build_user_content(
-    user_input: str, file_upload_verification_task: asyncio.Task[None], file_upload_tasks: list[asyncio.Task[JSON]]
+    user_input: str, file_upload_verification_task: asyncio.Task[None] | None, file_upload_tasks: list[asyncio.Task[JSON]]
 ) -> list[JSON]:
     """
     Build the user content to be sent to the model. This includes the user input text and any file uploads.
@@ -238,10 +232,11 @@ async def build_user_content(
     content: list[JSON] = [{"type": "text", "text": user_input}]
 
     # Ensure file uploads and verifications are done before querying the model.
-    async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
-        await file_upload_verification_task
+    if file_upload_verification_task:
+        async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
+            await file_upload_verification_task
 
-    async with live_print(lambda: f"[{count(file_upload_tasks, lambda t: t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
+    async with live_print(lambda: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
         metadata = await gather_file_uploads(file_upload_tasks)
     file_upload_tasks.clear()
 
@@ -258,7 +253,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
     session_name = deduce_session_name(args.session)
 
     user_messages, uploaded_files = process_user_blocks(history)
-    file_upload_verification_task = spawn_file_upload_verification_task(session, history, uploaded_files)
+    file_upload_verification_task = asyncio.create_task(verify_file_uploads(session, history, uploaded_files)) if uploaded_files else None
     file_upload_tasks = spawn_file_upload_tasks(session, args.file, uploaded_files)
 
     prompt_session: PromptSession[str] = PromptSession()
@@ -296,11 +291,11 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         elif autoname_task is not None:
             rprompt = f" auto-naming {spinner()}  {rprompt}"
 
-        if not file_upload_verification_task.done():
+        if file_upload_verification_task and not file_upload_verification_task.done():
             rprompt = f" verifying files {spinner()}  {rprompt}"
 
-        num_uploaded_files = count(uploaded_files.values(), lambda m: m is not None)
-        num_uploading = count(file_upload_tasks, lambda task: not task.done())
+        num_uploaded_files = sum(1 for m in uploaded_files.values() if m is not None)
+        num_uploading = sum(1 for t in file_upload_tasks if not t.done())
 
         num_total_files = num_uploaded_files + num_uploading
 

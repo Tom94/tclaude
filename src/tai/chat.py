@@ -21,6 +21,7 @@ import os
 import signal
 from itertools import chain
 
+import aiofiles.os
 import aiohttp
 from prompt_toolkit import PromptSession
 
@@ -95,37 +96,19 @@ def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
     return user_messages, uploaded_files
 
 
-def spawn_file_upload_tasks(
-    session: aiohttp.ClientSession, file_paths: list[str], uploaded_files: dict[str, JSON]
-) -> list[asyncio.Task[JSON]]:
-    """
-    Spawn file upload tasks for the given list of files. Returns a list of tasks that will upload the files and create an entry in the
-    provided `uploaded_files` dictionary for each successfully uploaded file.
-    """
-
-    async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
-        """
-        Handle the result of a file upload task. If the task was cancelled, we don't need to do anything. If it completed successfully,
-        we update the uploaded_files dictionary with the file ID.
-        """
-        result = await files.upload_file(session, file_path)
-        file_id = get(result, "id", str)
-        if file_id is not None:
-            uploaded_files[file_id] = result
-            return result
-
-        perror(f"Failed to upload file {file_path}. No file ID returned.")
+async def upload_file(session: aiohttp.ClientSession, file_path: str, uploaded_files: dict[str, JSON]) -> JSON:
+    if not await aiofiles.os.path.isfile(file_path):
+        perror(f"File {file_path} does not exist or is not a file.")
         return None
 
-    file_upload_tasks: list[asyncio.Task[JSON]] = []
-    for file in file_paths:
-        if not os.path.isfile(file):
-            perror(f"File {file} does not exist or is not a file.")
-            continue
+    result = await files.upload_file(session, file_path)
+    file_id = get(result, "id", str)
+    if file_id is not None:
+        uploaded_files[file_id] = result
+        return result
 
-        file_upload_tasks.append(asyncio.create_task(upload_file(session, file)))
-
-    return file_upload_tasks
+    perror(f"Failed to upload file {file_path}. No file ID returned.")
+    return None
 
 
 async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
@@ -254,7 +237,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
     user_messages, uploaded_files = process_user_blocks(history)
     file_upload_verification_task = asyncio.create_task(verify_file_uploads(session, history, uploaded_files)) if uploaded_files else None
-    file_upload_tasks = spawn_file_upload_tasks(session, args.file, uploaded_files)
+    file_upload_tasks = [asyncio.create_task(upload_file(session, f, uploaded_files)) for f in args.file if f]
 
     prompt_session: PromptSession[str] = PromptSession()
     for m in user_messages:

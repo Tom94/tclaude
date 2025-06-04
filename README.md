@@ -31,11 +31,7 @@ pip install . --user
 
 ## Usage
 
-Running `tai` opens a new chat session. Once you're done chatting, the session will be automatically named and saved as a .json file in the working directory.
-Customize the sessions directory by passing `--sessions-dir <dir>` or by setting the `TAI_SESSIONS_DIR` environment variable.
-Resume previous sessions with `-s <session name>.json`.
-
-You can also prompt via stdin / pipes or with CLI arguments.
+Running `tai` opens a new chat session. You can also use stdin, pipes or CLI arguments.
 
 ```bash
 tai "How do I make great pasta?"
@@ -62,6 +58,14 @@ tai "Tell me the factorials from 1 through 20."
 tai "What is the state of the art in physically based rendering?"
 > [Uses web search and responds with citations.]
 ```
+
+### Sessions
+
+Once you're done chatting, the session will be automatically named and saved as `<session-name>.json` in the working directory.
+
+You can resume the session with `tai -s <session-name>.json`.
+
+Customize where sessions are saved by passing `--sessions-dir <dir>` or by setting the `TAI_SESSIONS_DIR` environment variable.
 
 ### Extended thinking
 

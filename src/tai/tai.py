@@ -22,6 +22,11 @@ from .print import history_to_string, print_decoy_prompt
 
 
 def main():
+    if not "ANTHROPIC_API_KEY" in os.environ:
+        print("Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.", file=sys.stderr)
+        print("You can get an API key at https://console.anthropic.com/settings/keys", file=sys.stderr)
+        sys.exit(1)
+
     # If stdout is not a terminal, execute in prompt mode. No interactive chat; no progressive printing; no history.
     if not os.isatty(1):
         from . import prompt

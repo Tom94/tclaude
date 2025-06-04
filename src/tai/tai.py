@@ -20,12 +20,6 @@ import sys
 from . import common
 from .print import history_to_string, print_decoy_prompt
 
-def reattach_stdin():
-    if os.name == "nt":  # Windows
-        sys.stdin = open("CON", "r")
-    else:  # Unix/Linux/macOS
-        sys.stdin = open("/dev/tty", "r")
-
 
 def main():
     # If stdout is not a terminal, execute in prompt mode. No interactive chat; no progressive printing; no history.
@@ -43,11 +37,13 @@ def main():
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
     user_input = ""
-    if args.input:
-        user_input = " ".join(args.input)
-    elif not sys.stdin.isatty() and not sys.stdin.closed:
+    if not sys.stdin.isatty() and not sys.stdin.closed:
         user_input = sys.stdin.read().strip()
-        reattach_stdin()
+
+    if args.input:
+        if user_input:
+            user_input += "\n\n"
+        user_input += " ".join(args.input)
 
     print_decoy_prompt(user_input)
 

@@ -24,6 +24,8 @@ from itertools import chain
 import aiofiles.os
 import aiohttp
 from prompt_toolkit import PromptSession
+from prompt_toolkit.input import create_input
+from prompt_toolkit.output import create_output
 
 from . import common, files
 from .common import History, TaiArgs, perror, pinfo, pplain, psuccess, pwarning
@@ -239,7 +241,10 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
     file_upload_verification_task = asyncio.create_task(verify_file_uploads(session, history, uploaded_files)) if uploaded_files else None
     file_upload_tasks = [asyncio.create_task(upload_file(session, f, uploaded_files)) for f in args.file if f]
 
-    prompt_session: PromptSession[str] = PromptSession()
+    input = create_input(always_prefer_tty=True)
+    output = create_output()
+
+    prompt_session: PromptSession[str] = PromptSession(input=input, output=output)
     for m in user_messages:
         prompt_session.history.append_string(m)
 

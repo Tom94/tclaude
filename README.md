@@ -1,4 +1,4 @@
-# tai — Terminal AI (Claude only)
+# tai — Terminal AI
 
 **tai** aims to be a complete implementation of Claude in the terminal.
 
@@ -19,10 +19,9 @@ Planned features:
 
 ## Why use tai?
 
-Unlike other tools that aim to support all kinds of LLMs, tai is designed to be the best solution for Claude.
-One of the guiding principles of **tai** is to treat Claude API responses as the only source of truth, whereas other tools need to translate
-API responses to a common format in order to remain interoperable. Usually, information is lost in this conversion and model-specific
-features like Claude-native web search or code execution either take a while to be implemented or are not implemented at all.
+Unlike other tools that aim to support all kinds of LLMs, tai is designed to be the best solution for chatting with Claude in the terminal.
+One of the guiding principles of **tai** is to treat Claude API responses as the only source of truth rather than translating them to an interoperable custom format.
+This means model-specific features like caching, Claude-native web search or code execution can be implemented simply, correctly, and fully.
 
 ## Installation
 

@@ -29,6 +29,8 @@ git clone https://github.com/tom94/tai
 pip install . --user
 ```
 
+Then set the `ANTHROPIC_API_KEY` environment variable to your [Claude API key](https://console.anthropic.com/settings/keys) and you are good to go.
+
 ## Usage
 
 Running `tai` opens a new chat session. You can also use stdin, pipes or CLI arguments.

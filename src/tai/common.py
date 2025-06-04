@@ -270,6 +270,19 @@ def parse_tai_args():
     return args
 
 
+def read_user_input(input: list[str]) -> str:
+    user_input = ""
+    if not sys.stdin.isatty() and not sys.stdin.closed:
+        user_input = sys.stdin.read().strip()
+
+    if input:
+        if user_input:
+            user_input += "\n\n"
+        user_input += " ".join(input)
+
+    return user_input
+
+
 def deduce_model_name(model: str) -> str:
     if "opus" in model:
         if "3" in model:

@@ -463,14 +463,7 @@ async def async_main():
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
     args = common.parse_tai_args()
-
-    # Get user input from arguments or stdin
-    user_input = ""
-    if args.input:
-        user_input = " ".join(args.input)
-    elif not sys.stdin.isatty() and not sys.stdin.closed:
-        user_input = sys.stdin.read().strip()
-
+    user_input = common.read_user_input(args.input)
     if not user_input:
         print("No input provided.")
         return

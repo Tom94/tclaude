@@ -36,15 +36,7 @@ def main():
 
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
-    user_input = ""
-    if not sys.stdin.isatty() and not sys.stdin.closed:
-        user_input = sys.stdin.read().strip()
-
-    if args.input:
-        if user_input:
-            user_input += "\n\n"
-        user_input += " ".join(args.input)
-
+    user_input = common.read_user_input(args.input)
     print_decoy_prompt(user_input)
 
     from . import chat

@@ -1,12 +1,23 @@
 # tai — Terminal AI (Claude only)
 
-**tai** is a complete implementation of Claude in the terminal.
+**tai** aims to be a complete implementation of Claude in the terminal.
+
+Current features:
 - Interactive chat with resumable sessions and auto-naming
 - Extended thinking
-- Files (upload, analyze, read, write, etc.)
-- Server-side web search, code execution, and MCP
+- Files (upload, analyze, summarize w/ citations, etc.)
+  - Images and PDFs are natively supported
+  - Other files are analyzed by server-side code execution
+- Server-side web search and code execution
 - Custom tools
 - Automated caching (much lower cost!)
+
+Planned features:
+- Server- and client-side MCP
+- Download of code-generated files
+
+Unplanned:
+- Batch messages API
 
 ## Why use tai?
 

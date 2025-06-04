@@ -17,7 +17,6 @@
 import argparse
 import os
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal, TextIO, TypeAlias, cast
@@ -232,20 +231,27 @@ def load_session_if_exists(session_name: str, sessions_dir: str) -> History:
             if j is not None:
                 history = j
             else:
-                print(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
+                perror(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
     except json.JSONDecodeError:
-        print(f"Error: Could not parse session file {session_name}. Starting new session.")
+        perror(f"Could not parse session file {session_name}. Starting new session.")
 
     return history
 
 
 def load_system_prompt(path: str) -> str | None:
     system_prompt = None
+    if not os.path.isfile(path):
+        candidate = os.path.join(get_config_dir(), "roles", path)
+        if os.path.isfile(candidate):
+            path = candidate
+        else:
+            perror(f"System prompt file {path} does not exist.")
+            return None
     try:
         with open(path, "r") as f:
             system_prompt = f.read().strip()
     except Exception as e:
-        print(f"Error reading system prompt file: {e}")
+        perror(f"Failed to load system prompt file {path}: {e}")
     return system_prompt
 
 

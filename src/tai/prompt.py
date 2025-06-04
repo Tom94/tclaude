@@ -458,7 +458,7 @@ async def stream_response(
     )
 
 
-async def async_main():
+async def async_prompt(print_text_only: bool ):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -493,11 +493,15 @@ async def async_main():
             history.extend(response.messages)
             call_again = response.call_again
 
-    print(history_to_string(history[1:], pretty=False), end="", flush=True)
+    print(history_to_string(history[1:], pretty=False, text_only=print_text_only), end="", flush=True)
+
+
+def prompt(print_text_only: bool):
+    asyncio.run(async_prompt(print_text_only=print_text_only))
 
 
 def main():
-    asyncio.run(async_main())
+    prompt(print_text_only=False)
 
 
 if __name__ == "__main__":

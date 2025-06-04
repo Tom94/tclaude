@@ -31,7 +31,7 @@ def main():
     if not os.isatty(1):
         from . import prompt
 
-        prompt.main()
+        prompt.prompt(print_text_only=True)
         return
 
     args = common.parse_tai_args()

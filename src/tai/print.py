@@ -189,7 +189,13 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
 
 
 def write_user_message(
-    message: JSON, io: StringIO, pretty: bool, wrap_width: int, skip_user_text: bool, uploaded_files: dict[str, JSON] | None
+    message: JSON,
+    io: StringIO,
+    pretty: bool,
+    wrap_width: int,
+    skip_user_text: bool,
+    uploaded_files: dict[str, JSON] | None,
+    text_only: bool,
 ):
     prompt = f"{common.CHEVRON} "
     if pretty:
@@ -198,6 +204,9 @@ def write_user_message(
     files: dict[str, str] = {}
 
     for content_block in get_or_default(message, "content", list[JSON]):
+        if text_only and get(content_block, "type", str) != "text":
+            continue
+
         match content_block:
             case {"type": "text", "text": str(input)}:
                 if not skip_user_text:
@@ -239,7 +248,7 @@ def write_user_message(
         _ = io.write("\n\n")
 
 
-def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int):
+def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int, text_only: bool):
     @dataclass(frozen=True)
     class Reference:
         id: int
@@ -258,6 +267,11 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
     while i < len(content_blocks):
         content_block = content_blocks[i]
         block_type = get(content_block, "type", str)
+
+        if text_only and block_type != "text":
+            i += 1
+            continue
+
         if block_type == "code_execution_tool_result" or block_type == "web_search_tool_result":
             i += 1
             continue  # These are handled alongside the tool use
@@ -326,7 +340,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
     if stop_reason is not None:
         if references:
             references_io = StringIO()
-            for k, v in sorted(references.items(), key=lambda x: x[1].id):
+            for _, v in sorted(references.items(), key=lambda x: x[1].id):
                 _ = references_io.write(f"{to_superscript(v.id)} {v.title}\n")
                 for val in sorted(v.cited_texts):
                     _ = references_io.write(f"   {val}\n")
@@ -338,7 +352,12 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
 
 
 def history_to_string(
-    history: History, pretty: bool, wrap_width: int = 0, skip_user_text: bool = False, uploaded_files: dict[str, JSON] | None = None
+    history: History,
+    pretty: bool,
+    wrap_width: int = 0,
+    skip_user_text: bool = False,
+    uploaded_files: dict[str, JSON] | None = None,
+    text_only: bool = False,
 ) -> str:
     tool_results = gather_tool_results(history)
 
@@ -348,9 +367,9 @@ def history_to_string(
         if role == "system":
             write_system_message(message, io)
         elif role == "user":
-            write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text, uploaded_files=uploaded_files)
+            write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text, uploaded_files=uploaded_files, text_only=text_only)
         elif role == "assistant":
-            write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width)
+            write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width, text_only=text_only)
 
     return rstrip(io).getvalue()
 

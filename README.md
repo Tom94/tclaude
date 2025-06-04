@@ -5,16 +5,17 @@
 Current features:
 - Interactive chat with resumable sessions and auto-naming
 - Extended thinking
+- Web search and server-side code execution
 - Files (upload, analyze, summarize w/ citations, etc.)
   - Images and PDFs are natively supported
-  - Other files are analyzed by server-side code execution
-- Server-side web search and code execution
+  - Other files are analyzed by code execution
 - Custom tools
 - Automated caching (much lower cost!)
 
 Planned features:
 - Server- and client-side MCP
 - Download of code-generated files
+- Claude-native client tools (text editor & computer use)
 
 
 ## Why use tai?
@@ -62,6 +63,11 @@ If you'd like to load different system prompts on a case-by-case basis, you can 
 tai --role pirate.md "How do I make great pasta?"
 > Ahoy there, matey! Ye be seekin' the secrets of craftin' the finest pasta this side of the Mediterranean, eh? ...
 ```
+
+### Custom tools
+
+Simply implement your tool as a function in `src/tai/tools.py` and it will be callable by Claude.
+Make sure to [document the tools' function, parameters, and return values in detail](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/implement-tool-use#best-practices-for-tool-definitions).
 
 ## License
 

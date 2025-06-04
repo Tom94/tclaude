@@ -2,7 +2,6 @@
 
 **tai** aims to be a complete implementation of Claude in the terminal.
 
-Current features:
 - Interactive chat with resumable sessions and auto-naming
 - Extended thinking
 - Web search and server-side code execution
@@ -12,7 +11,7 @@ Current features:
 - Custom tools
 - Automated caching (much lower cost!)
 
-Planned features:
+Coming soon:
 - Server- and client-side MCP
 - Download of code-generated files
 - Claude-native client tools (text editor & computer use)
@@ -20,9 +19,8 @@ Planned features:
 
 ## Why use tai?
 
-Unlike other tools that aim to support all kinds of LLMs, tai is designed to be the best solution for chatting with Claude in the terminal.
-One of the guiding principles of **tai** is to treat Claude API responses as the only source of truth rather than translating them to an interoperable custom format.
-This means model-specific features like caching, Claude-native web search or code execution can be implemented simply, correctly, and fully.
+Unlike other tools that aim to support all kinds of LLMs, **tai** is designed specifically for Claude in the terminal.
+As such, Claude-specific features like caching, Claude-native web search or code execution are implemented simply, correctly, and fully.
 
 ## Installation
 
@@ -33,9 +31,21 @@ pip install . --user
 
 ## Usage
 
+Running `tai` opens a new chat session. Once you're done chatting, the session will be automatically named and saved as a .json file in the working directory.
+Customize the sessions directory by passing `--sessions-dir <dir>` or by setting the `TAI_SESSIONS_DIR` environment variable.
+Resume previous sessions with `-s <session name>.json`.
+
+You can also prompt via stdin / pipes or with CLI arguments.
+
 ```bash
 tai "How do I make great pasta?"
+# or: echo "How do I make great pasta?" | tai
 > Great pasta starts with quality ingredients and proper technique. ...
+```
+
+Or use an outward pipe to integrate `tai` into unix workflows
+```bash
+git diff --staged | tai "Write a commit message for this diff." | xargs -0 git commit -m
 ```
 
 Upload files with `-f`
@@ -51,6 +61,14 @@ tai "Tell me the factorials from 1 through 20."
 
 tai "What is the state of the art in physically based rendering?"
 > [Uses web search and responds with citations.]
+```
+
+### Extended thinking
+
+Enable thinking with `--thinking`
+```bash
+tai --thinking "Write a quine in C++."
+> [Claude thinks about how to write a quine before responding.]
 ```
 
 ### Custom system prompt

@@ -19,17 +19,18 @@ import contextlib
 import importlib
 import inspect
 import json
-import sys
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from io import StringIO
+from itertools import chain
 from typing import Callable, cast
 
+import aiofiles.os
 import aiohttp
 from partial_json_parser import loads as partial_loads
 
-from . import common, endpoints
-from .common import History, pplain, pwarning
+from . import common, endpoints, files
+from .common import History, perror, pplain, pwarning
 from .json import JSON, get, get_or, get_or_default
 from .print import history_to_string
 
@@ -458,6 +459,98 @@ async def stream_response(
     )
 
 
+def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str, JSON]) -> None:
+    """
+    Erase all content blocks in the history that have no entry in `uploaded_files`. This is useful when we want to remove file references
+    from the history after verifying or processing them.
+    """
+
+    def is_valid_block(block: JSON) -> bool:
+        match block:
+            case {"type": "container_upload", "file_id": file_id}:
+                return file_id in uploaded_files
+            case {"type": "document" | "image", "source": {"file_id": file_id}}:
+                return file_id in uploaded_files
+            case _:  # Other block types, like text or tool use are always valid
+                return True
+
+    for message in history:
+        if get(message, "role", str) != "user":
+            continue
+
+        content = get_or_default(message, "content", list[JSON])
+        message["content"] = [block for block in content if is_valid_block(block)]
+
+
+async def verify_file_uploads(session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]):
+    """
+    Verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and have not been
+    removed or corrupted. The updates the `uploaded_files` dictionary with the metadata of the uploaded files.
+    """
+    file_upload_verification_task = asyncio.gather(
+        *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
+    )
+
+    metadata_list = await file_upload_verification_task
+    for metadata in metadata_list:
+        match metadata:
+            case {"id": str(file_id)}:
+                uploaded_files[file_id] = metadata
+            case BaseException() as e:
+                perror(f"Failed to verify file upload: {e}")
+            case _:
+                pwarning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
+
+    # Remove any files that were not found or had an error
+    missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
+    for file_id in missing_files:
+        pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
+        del uploaded_files[file_id]
+
+    erase_invalid_file_content_blocks(history, uploaded_files)
+
+
+async def upload_file(session: aiohttp.ClientSession, file_path: str, uploaded_files: dict[str, JSON]) -> JSON:
+    if not await aiofiles.os.path.isfile(file_path):
+        perror(f"File {file_path} does not exist or is not a file.")
+        return None
+
+    result = await files.upload_file(session, file_path)
+    file_id = get(result, "id", str)
+    if file_id is None:
+        raise RuntimeError(f"Failed to upload file {file_path}. No file ID returned.")
+
+    uploaded_files[file_id] = result
+    return result
+
+
+def file_metadata_to_content(metadata: JSON) -> list[JSON]:
+    """
+    Convert a file metadata JSON object to a list of content blocks that can be added to the history.
+    """
+    content: list[JSON] = []
+
+    type = files.mime_type_to_content_block_type(get_or(metadata, "mime_type", ""))
+    id = get(metadata, "id", str)
+    if id is None:
+        return content
+
+    # Even if the type is invalid, the code execution tool might still be able to handle the file. Always put valid file IDs
+    # into the code execution container.
+    content.append({"type": "container_upload", "file_id": id})
+    if type is None:
+        return content
+
+    info: dict[str, JSON] = {"type": type, "source": {"type": "file", "file_id": id}}
+    if type == "document":
+        info["context"] = "This document was uploaded by the user."
+        info["citations"] = {"enabled": True}
+        info["title"] = get_or(metadata, "filename", id)
+
+    content.append(info)
+    return content
+
+
 async def async_prompt(print_text_only: bool ):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
@@ -468,14 +561,21 @@ async def async_prompt(print_text_only: bool ):
         print("No input provided.")
         return
 
-    # Read system prompt from file if provided
-    system_prompt = None
-    if args.role:
-        system_prompt = common.load_system_prompt(args.role)
-
-    history: History = [{"role": "user", "content": [{"type": "text", "text": user_input}]}]
+    system_prompt = common.load_system_prompt(args.role) if args.role else None
+    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
 
     async with aiohttp.ClientSession() as session:
+        _, uploaded_files = common.process_user_blocks(history)
+
+        async with asyncio.TaskGroup() as tg:
+            if uploaded_files:
+                _ = tg.create_task(verify_file_uploads(session, history, uploaded_files))
+            file_metadata = [tg.create_task(upload_file(session, f, uploaded_files)) for f in args.file]
+
+        user_content: list[JSON] = [{"type": "text", "text": user_input}]
+        user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
+        history.append({"role": "user", "content": user_content})
+
         call_again = True
         while call_again:
             response = await stream_response(

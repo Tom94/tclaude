@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal, TextIO, TypeAlias, cast
 
-from .json import JSON, get, of_type_or_none
+from .json import JSON, get, get_or_default, of_type_or_none
 
 History: TypeAlias = list[dict[str, JSON]]
 
@@ -178,6 +178,37 @@ def get_latest_container(messages: History) -> Container | None:
             return Container(id=id, expires_at=expires_at)
 
     return None
+
+
+def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
+    """
+    Process the initial history to extract user messages and uploaded files.
+    Returns a tuple of:
+    - A list of user messages as strings.
+    - A dictionary of uploaded files with their file IDs as keys and metadata as values.
+    """
+    user_messages: list[str] = []
+    uploaded_files: dict[str, JSON] = {}
+
+    for message in history:
+        if get(message, "role", str) != "user":
+            continue
+
+        for content_block in get_or_default(message, "content", list[JSON]):
+            match content_block:
+                case {"type": "text", "text": str(text)}:
+                    user_messages.append(text)
+                case {"type": "container_upload", "file_id": str(file_id)} | {
+                    "type": "document" | "image",
+                    "source": {"file_id": str(file_id)},
+                }:
+                    uploaded_files[file_id] = {}
+                case {"type": "tool_result"}:
+                    pass
+                case _:
+                    pwarning(f"Unknown content block type in user message: {content_block}")
+
+    return user_messages, uploaded_files
 
 
 def load_session_if_exists(session_name: str, sessions_dir: str) -> History:

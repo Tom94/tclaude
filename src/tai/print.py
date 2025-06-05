@@ -106,7 +106,7 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
 
     if get(tool_result, "is_error", str):
         error_message = get_or(tool_result, "error", "<unknown>")
-        write_error_block(f"Error", error_message, io, pretty, wrap_width)
+        write_error_block("Error", error_message, io, pretty, wrap_width)
         return
 
     if tool_name == "fetch_url":
@@ -146,9 +146,9 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
             title += f" {spinner()}"
         else:
             if get(tool_result, "is_error", bool):
-                title += f" ✗"
+                title += " ✗"
             else:
-                title += f" ✓"
+                title += " ✓"
         return title, text, tool_result
 
     name = get(tool_use, "name", str)
@@ -217,7 +217,7 @@ def write_user_message(
             case {"type": "container_upload", "file_id": str(file_id)}:
                 # Record container uploads only if their ID isn't already in the files dict. This can happen, at which point we have more
                 # precise knowledge about the file type already.
-                if not file_id in files:
+                if file_id not in files:
                     files[file_id] = "container_upload"
             case {"type": "tool_result"}:
                 pass  # Tool results are handled in the assistant message's tool_use block
@@ -329,11 +329,11 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
             write_tool_use(content_block, tool_results, io, pretty, wrap_width)
         elif block_type == "redacted_thinking":
             encrypted_thinking = get_or(content_block, "data", "")
-            write_call_block(f"Redacted thinking", f"{len(encrypted_thinking)} bytes of encrypted thinking data.", io, pretty, wrap_width)
+            write_call_block("Redacted thinking", f"{len(encrypted_thinking)} bytes of encrypted thinking data.", io, pretty, wrap_width)
         else:
             write_call_block(f"assistant `{block_type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
 
-        _ = io.write(f"\n\n")
+        _ = io.write("\n\n")
         i += 1
 
     stop_reason = get(message, "stop_reason", str)

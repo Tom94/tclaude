@@ -4,6 +4,9 @@ line-length = 160
 [tool.isort]
 profile = "black"
 
+[tool.ruff]
+line-length = 160
+
 [tool.basedpyright]
 reportIgnoreCommentWithoutRule = false
 

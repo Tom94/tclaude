@@ -27,11 +27,11 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
-from . import common, logging
+from . import common
 from .common import History, TaiArgs
 from .json import JSON
 from .live_print import live_print
-from .print import history_to_string, print_decoy_prompt
+from .print import history_to_string
 from .prompt import (
     Response,
     TokenCounter,
@@ -84,11 +84,11 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
             result = await task
             results.append(result)
         except aiohttp.ClientError as e:
-            logger.opt(exception=True).error(f"Failed to upload file.")
-        except asyncio.CancelledError:
-            logger.opt(exception=True).error("File upload cancelled.")
+            logger.opt(exception=e).error(f"Failed to upload file: {e}")
+        except asyncio.CancelledError as e:
+            logger.opt(exception=e).error("File upload cancelled.")
         except Exception as e:
-            logger.opt(exception=True).error(f"Error during file upload.")
+            logger.opt(exception=e).error(f"Error during file upload: {e}")
 
     return results
 
@@ -317,7 +317,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                 if not autoname_task.done():
                     _ = autoname_task.cancel()
                 await autoname_task
-            except aiohttp.ClientError as e:
+            except aiohttp.ClientError:
                 pass
             except asyncio.CancelledError:
                 pass

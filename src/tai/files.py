@@ -263,7 +263,7 @@ async def async_main():
                 for file_id in args.files:
                     download_tasks.append(tg.create_task(get_filename_and_download(session, file_id)))
 
-            print(f"Finished.")
+            print("Finished.")
 
 
 def main():

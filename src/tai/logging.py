@@ -40,7 +40,7 @@ def pprint(message: loguru.Message):
     level = message.record["level"]
     prefix = f"\r\033[2K{ANSI_MID_GRAY}"
     if level.name == "SUCCESS":
-        prefix += f"[✓] "
+        prefix += "[✓] "
     elif level.name == "WARNING":
         prefix += f"[{ANSI_BOLD_YELLOW}w{ANSI_MID_GRAY}] "
     elif level.name == "ERROR":

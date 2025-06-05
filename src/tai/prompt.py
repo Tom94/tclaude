@@ -83,19 +83,19 @@ def get_tool_definitions() -> list[JSON]:
 
             # Try to extract type from annotation
             if param.annotation != inspect.Parameter.empty:
-                if param.annotation == str:
+                if param.annotation is str:
                     param_type = "string"
-                elif param.annotation == int:
+                elif param.annotation is int:
                     param_type = "integer"
-                elif param.annotation == float:
+                elif param.annotation is float:
                     param_type = "number"
-                elif param.annotation == bool:
+                elif param.annotation is bool:
                     param_type = "boolean"
                 elif hasattr(param.annotation, "__origin__"):
                     # Handle generic types like List[str]
-                    if param.annotation.__origin__ == list:
+                    if param.annotation.__origin__ is list:
                         param_type = "array"
-                    elif param.annotation.__origin__ == dict:
+                    elif param.annotation.__origin__ is dict:
                         param_type = "object"
 
             properties[param_name] = {"type": param_type, "description": param_desc}
@@ -402,7 +402,7 @@ async def stream_response(
                             if tuj.tell() > 0:
                                 try:
                                     content_block["input"] = partial_loads(tuj.getvalue())
-                                except:
+                                except Exception:
                                     pass
                         case _:
                             logger.warning(f"Unknown content block delta type: {delta}")
@@ -412,7 +412,7 @@ async def stream_response(
 
                 # Something unexpected
                 case _:
-                    if not "message" in get_or(data, "type", ""):
+                    if "message" not in get_or(data, "type", ""):
                         logger.warning(f"Unknown message type: {data}")
 
             if on_response_update is not None:

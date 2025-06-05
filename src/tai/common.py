@@ -19,7 +19,9 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Literal, TextIO, TypeAlias, cast
+from typing import Callable, TypeAlias, cast
+
+from loguru import logger
 
 from .json import JSON, get, get_or_default, of_type_or_none
 
@@ -37,11 +39,13 @@ def ansi(cmd: str) -> str:
 ANSI_MID_GRAY = ansi("0;38;5;245m")
 ANSI_BOLD_YELLOW = ansi("1;33m")
 ANSI_BOLD_BRIGHT_RED = ansi("1;91m")
+ANSI_RESET = ansi("0m")
+ANSI_BEGINNING_OF_LINE = ansi("1G")
 
 
 def wrap_style(msg: str, cmd: str, pretty: bool = True) -> str:
     if pretty:
-        return f"{ansi(cmd)}{msg}{ansi('0m')}"
+        return f"{ansi(cmd)}{msg}{ANSI_RESET}"
     return msg
 
 
@@ -61,71 +65,16 @@ def escape(text: str) -> str:
     return repr(text.strip().replace("\n", " ").replace("\r", "").replace("\t", " "))
 
 
-def pplain(
-    *values: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: TextIO | None = None,
-    flush: Literal[False] = False,
-):
+def get_log_dir() -> str:
     """
-    Print plain messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
+    Get the path to the configuration file.
     """
-    print(gray_style(" ".join(map(str, values))), sep=sep, end=end, file=file, flush=flush)
+    if "XDG_STATE_HOME" in os.environ:
+        config_dir = os.environ["XDG_STATE_HOME"]
+    else:
+        config_dir = os.path.join(os.path.expanduser("~"), ".local", "state")
 
-
-def pinfo(
-    *args: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: TextIO | None = None,
-    flush: Literal[False] = False,
-):
-    """
-    Print info messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    pplain("[i]", *args, sep=sep, end=end, file=file, flush=flush)
-
-
-def psuccess(
-    *args: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: TextIO | None = None,
-    flush: Literal[False] = False,
-):
-    """
-    Print success messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    pplain("[✓]", *args, sep=sep, end=end, file=file, flush=flush)
-
-
-def pwarning(
-    *args: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: TextIO | None = None,
-    flush: Literal[False] = False,
-):
-    """
-    Print warning messages to stderr. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    file = file or sys.stderr
-    pplain(f"[{ANSI_BOLD_YELLOW}w{ANSI_MID_GRAY}]", *args, sep=sep, end=end, file=file, flush=flush)
-
-
-def perror(
-    *args: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: TextIO | None = None,
-    flush: Literal[False] = False,
-):
-    """
-    Print error messages to stdout. Use this instead of print() to ensure that the output is formatted correctly.
-    """
-    file = file or sys.stderr
-    pplain(f"[{ANSI_BOLD_BRIGHT_RED}e{ANSI_MID_GRAY}]", *args, sep=sep, end=end, file=file, flush=flush)
+    return os.path.join(config_dir, "tai")
 
 
 def get_config_dir() -> str:
@@ -205,7 +154,7 @@ def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
                 case {"type": "tool_result"}:
                     pass
                 case _:
-                    pwarning(f"Unknown content block type in user message: {content_block}")
+                    logger.warning(f"Unknown content block type in user message: {content_block}")
 
     return user_messages, uploaded_files
 
@@ -231,9 +180,9 @@ def load_session_if_exists(session_name: str, sessions_dir: str) -> History:
             if j is not None:
                 history = j
             else:
-                perror(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
+                logger.error(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
     except json.JSONDecodeError:
-        perror(f"Could not parse session file {session_name}. Starting new session.")
+        logger.opt(exception=True).error(f"Could not parse session file {session_name}. Starting new session.")
 
     return history
 
@@ -244,14 +193,11 @@ def load_system_prompt(path: str) -> str | None:
         candidate = os.path.join(get_config_dir(), "roles", path)
         if os.path.isfile(candidate):
             path = candidate
-        else:
-            perror(f"System prompt file {path} does not exist.")
-            return None
     try:
         with open(path, "r") as f:
             system_prompt = f.read().strip()
-    except Exception as e:
-        perror(f"Failed to load system prompt file {path}: {e}")
+    except FileNotFoundError:
+        logger.error(f"System prompt file {path} not found.")
     return system_prompt
 
 
@@ -383,7 +329,7 @@ def make_check_bat_available() -> Callable[[], bool]:
                 is_bat_available = True
             except (FileNotFoundError, subprocess.CalledProcessError):
                 is_bat_available = False
-                pwarning("Install `bat` (https://github.com/sharkdp/bat) to enable syntax highlighting.")
+                logger.warning("Install `bat` (https://github.com/sharkdp/bat) to enable syntax highlighting.")
 
         return is_bat_available
 

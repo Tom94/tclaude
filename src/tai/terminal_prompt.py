@@ -15,15 +15,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
 from typing import Callable
 
 from prompt_toolkit import ANSI, PromptSession
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.patch_stdout import patch_stdout
 
-from . import common
+from . import common, logging
 from .spinner import SPINNER_FPS
 
 
@@ -68,51 +67,58 @@ async def terminal_prompt(
     lprompt: Callable[[str], str],
     rprompt: Callable[[str], str],
     prompt_session: PromptSession[str],
+    user_input: str = "",
 ) -> str:
     key_bindings = create_prompt_key_bindings()
 
-    print(common.ansi("1G"), end="")  # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
-    user_input = ""
-    while not user_input:
-        with StringIO() as stdout, redirect_stdout(stdout), redirect_stderr(stdout):
+    # Ensure we don't have stray remaining characters from user typing before the prompt was ready.
+    print(common.ANSI_BEGINNING_OF_LINE, end="", flush=False)
 
-            def prefix() -> str:
-                result = ""
-                if stdout.tell() > 0:
-                    result = f"{stdout.getvalue().rstrip()}\n\n"
-                return result
+    prefix = ""
 
-            async def animate_prompts():
-                try:
-                    while True:
-                        await asyncio.sleep(1 / SPINNER_FPS)
+    def update_prefix():
+        nonlocal prefix
+        if logging.did_print_since_prompt:
+            prefix = "\n"
+            logging.did_print_since_prompt = False
 
-                        lprefix = prefix()
-                        rprefix = "\n" * lprefix.count("\n")
+    update_prefix()
 
-                        prompt_session.message = ANSI(common.prompt_style(lprompt(lprefix)))
-                        prompt_session.rprompt = ANSI(common.prompt_style(rprompt(rprefix)))
-                except asyncio.CancelledError:
-                    pass
+    async def animate_prompts():
+        try:
+            while True:
+                await asyncio.sleep(1 / SPINNER_FPS)
 
-            animate_task = asyncio.create_task(animate_prompts())
-            try:
-                user_input = await prompt_session.prompt_async(
-                    ANSI(common.prompt_style(lprompt(""))),
-                    rprompt=ANSI(common.prompt_style(rprompt(""))),
-                    vi_mode=True,
-                    cursor=ModalCursorShapeConfig(),
-                    multiline=True,
-                    wrap_lines=True,
-                    placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
-                    key_bindings=key_bindings,
-                    refresh_interval=1 / SPINNER_FPS,
-                    handle_sigint=False,
-                )
-            finally:
-                _ = animate_task.cancel()
-                await animate_task
+                if logging.did_print_since_prompt:
+                    nonlocal prefix
+                    prefix = "\n"
 
-        user_input = user_input.strip()
+                update_prefix()
+                prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
+                prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
+        except asyncio.CancelledError:
+            pass
 
+    animate_task = asyncio.create_task(animate_prompts())
+    try:
+        with patch_stdout(raw=True):
+            user_input = await prompt_session.prompt_async(
+                ANSI(common.prompt_style(lprompt(prefix))),
+                rprompt=ANSI(common.prompt_style(rprompt(prefix))),
+                vi_mode=True,
+                cursor=ModalCursorShapeConfig(),
+                multiline=True,
+                wrap_lines=True,
+                placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
+                key_bindings=key_bindings,
+                refresh_interval=1 / SPINNER_FPS,
+                handle_sigint=False,
+                default=user_input,
+                accept_default=user_input != "",
+            )
+    finally:
+        _ = animate_task.cancel()
+        await animate_task
+
+    user_input = user_input.strip()
     return user_input

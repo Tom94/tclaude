@@ -17,11 +17,13 @@
 import os
 import sys
 
-from . import common
+from . import common, logging
 from .print import history_to_string, print_decoy_prompt
 
 
 def main():
+    logging.setup()
+
     if not "ANTHROPIC_API_KEY" in os.environ:
         print("Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.", file=sys.stderr)
         print("You can get an API key at https://console.anthropic.com/settings/keys", file=sys.stderr)
@@ -42,7 +44,8 @@ def main():
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
     user_input = common.read_user_input(args.input)
-    print_decoy_prompt(user_input)
+    if not user_input:
+        print_decoy_prompt("")
 
     from . import chat
 

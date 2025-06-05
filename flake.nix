@@ -20,6 +20,7 @@
           beautifulsoup4
           html2text
           humanize
+          loguru
           partial-json-parser
           prompt_toolkit
           wcwidth

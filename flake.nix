@@ -74,19 +74,6 @@
             pythonPackages.flake8
             pythonPackages.mypy
           ] ++ pythonDeps;
-
-          shellHook = ''
-            echo "Python development environment"
-            echo "Python version: $(python --version)"
-
-            # Create virtual environment if it doesn't exist
-            if [ ! -d .venv ]; then
-              python -m venv .venv
-            fi
-
-            source .venv/bin/activate
-            pip install -e .
-          '';
         };
       });
 }

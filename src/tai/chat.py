@@ -22,15 +22,16 @@ import signal
 from itertools import chain
 
 import aiohttp
+from loguru import logger
 from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
-from . import common
-from .common import History, TaiArgs, perror, pinfo, pplain, psuccess
+from . import common, logging
+from .common import History, TaiArgs
 from .json import JSON
 from .live_print import live_print
-from .print import history_to_string
+from .print import history_to_string, print_decoy_prompt
 from .prompt import (
     Response,
     TokenCounter,
@@ -83,11 +84,11 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
             result = await task
             results.append(result)
         except aiohttp.ClientError as e:
-            perror(f"Failed to upload file: {e}")
+            logger.opt(exception=True).error(f"Failed to upload file.")
         except asyncio.CancelledError:
-            perror("File upload cancelled.")
+            logger.opt(exception=True).error("File upload cancelled.")
         except Exception as e:
-            perror(f"Error during file upload: {e}")
+            logger.opt(exception=True).error(f"Error during file upload.")
 
     return results
 
@@ -178,13 +179,14 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
     response: Response | None = None
     while True:
         if is_user_turn:
+            try:
+                user_input = await terminal_prompt(lprompt, rprompt, prompt_session, user_input)
+            except EOFError:
+                break
+            except KeyboardInterrupt:
+                continue
             if not user_input:
-                try:
-                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session)
-                except EOFError:
-                    break
-                except KeyboardInterrupt:
-                    continue
+                continue
 
             if file_upload_verification_task:
                 async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
@@ -210,9 +212,9 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
         if args.verbose:
             if container is not None:
-                pinfo(f"Reusing code execution container `{container.id}`")
+                logger.info(f"Reusing code execution container `{container.id}`")
 
-            pinfo(f"write_cache={write_cache}")
+            logger.info(f"write_cache={write_cache}")
 
         partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
         try:
@@ -241,11 +243,11 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                 _ = history.pop()
             is_user_turn = True
 
-            pplain("\n")
+            print("\n")
             if isinstance(e, asyncio.CancelledError):
-                perror("Response cancelled.\n")
+                logger.error("Response cancelled.\n")
             else:
-                perror(f"Unexpected error: {e}. Please try again.\n")
+                logger.opt(exception=e).error(f"Unexpected error: {e}. Please try again.\n")
 
             continue
         finally:
@@ -254,7 +256,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
         history.extend(response.messages)
         total_tokens += response.tokens
 
-        pplain("\n")
+        print("\n")
         if args.verbose:
             response.tokens.print_tokens()
             response.tokens.print_cost(args.model)
@@ -286,9 +288,9 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
                         session_name = history_to_string(response.messages, pretty=False)
                     except (aiohttp.ClientError, asyncio.CancelledError) as e:
                         if isinstance(e, asyncio.CancelledError):
-                            perror("Auto-naming cancelled. Using timestamp.")
+                            logger.error("Auto-naming cancelled. Using timestamp.")
                         else:
-                            perror(f"Error auto-naming session: {e}.")
+                            logger.opt(exception=e).error(f"Error auto-naming session: {e}.")
                         session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
                     session_name = session_name.strip().lower()
@@ -297,11 +299,11 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
 
                     date = datetime.datetime.now().strftime("%Y-%m-%d")
                     session_name = f"{date}-{session_name}"
-                    psuccess(f"Session named {session_name}")
+                    logger.success(f"Session named {session_name}")
 
                 autoname_task.add_done_callback(handle_autoname_result)
 
-    pplain()
+    print()
 
     # If we received at least one response
     if response is not None:
@@ -331,7 +333,7 @@ async def async_chat(session: aiohttp.ClientSession, args: TaiArgs, history: His
             with open(session_path, "w") as f:
                 json.dump(history, f, indent=2)
 
-            psuccess(f"Saved session to {session_path}")
+            logger.success(f"Saved session to {session_path}")
 
     if args.verbose:
         total_tokens.print_tokens()

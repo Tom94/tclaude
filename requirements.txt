@@ -4,6 +4,8 @@
 #
 #    pip-compile
 #
+aiofiles==24.1.0
+    # via tai (pyproject.toml)
 aiohappyeyeballs==2.6.1
     # via aiohttp
 aiohttp==3.11.15
@@ -20,8 +22,12 @@ frozenlist==1.5.0
     #   aiosignal
 html2text==2024.2.26
     # via tai (pyproject.toml)
+humanize==4.12.3
+    # via tai (pyproject.toml)
 idna==3.10
     # via yarl
+loguru==0.7.3
+    # via tai (pyproject.toml)
 multidict==6.2.0
     # via
     #   aiohttp

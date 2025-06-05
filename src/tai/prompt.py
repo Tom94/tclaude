@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import importlib
@@ -27,10 +29,11 @@ from typing import Callable, cast
 
 import aiofiles.os
 import aiohttp
+from loguru import logger
 from partial_json_parser import loads as partial_loads
 
-from . import common, endpoints, files
-from .common import History, perror, pplain, pwarning
+from . import common, endpoints, files, logging
+from .common import History
 from .json import JSON, get, get_or, get_or_default
 from .print import history_to_string
 
@@ -139,9 +142,7 @@ async def use_tools(messages: History) -> dict[str, JSON]:
                 tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id})
                 tool_tasks.append(tool_use_task)
             else:
-                tool_results.append(
-                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True}
-                )
+                tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True})
                 tool_tasks.append(None)
 
     # Wait for all async tool calls to complete
@@ -162,15 +163,13 @@ async def use_tools(messages: History) -> dict[str, JSON]:
 
 
 class TokenCounter:
-    def __init__(
-        self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0
-    ):
+    def __init__(self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0):
         self.cache_creation: int = cache_creation_input_tokens
         self.cache_read: int = cache_read_input_tokens
         self.input: int = input_tokens
         self.output: int = output_tokens
 
-    def __add__(self, other: "TokenCounter") -> "TokenCounter":
+    def __add__(self, other: TokenCounter) -> TokenCounter:
         result = TokenCounter()
         result.cache_creation = self.cache_creation + other.cache_creation
         result.cache_read = self.cache_read + other.cache_read
@@ -205,13 +204,11 @@ class TokenCounter:
         return cache_creation_cost + cache_read_cost + input_cost + output_cost
 
     def print_tokens(self):
-        pplain(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
+        logger.info(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
 
     def print_cost(self, model: str):
         cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
-        pplain(
-            f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}"
-        )
+        logger.info(f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}")
 
 
 async def stream_events(session: aiohttp.ClientSession, url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
@@ -408,7 +405,7 @@ async def stream_response(
                                 except:
                                     pass
                         case _:
-                            pwarning(f"Unknown content block delta type: {delta}")
+                            logger.warning(f"Unknown content block delta type: {delta}")
                 case {"type": "content_block_stop", "index": int(index)}:
                     content_block = get_or_default(messages[-1], "content", list[dict[str, JSON]])[index]
                     pass  # Content block stop is just a signal that the content block is complete.
@@ -416,7 +413,7 @@ async def stream_response(
                 # Something unexpected
                 case _:
                     if not "message" in get_or(data, "type", ""):
-                        pwarning(f"Unknown message type: {data}")
+                        logger.warning(f"Unknown message type: {data}")
 
             if on_response_update is not None:
                 on_response_update(Response(messages=messages, tokens=tokens, call_again=False))
@@ -432,7 +429,7 @@ async def stream_response(
                 | {"type": "text", "text": ""}
                 | {"type": "citations", "citations": []}
             ):
-                pwarning(f"Content block {content_block} is empty, removing it.")
+                logger.warning(f"Content block {content_block} is empty, removing it.")
                 return False
             case _:
                 return True
@@ -440,7 +437,7 @@ async def stream_response(
     for message in messages:
         content_blocks = get_or_default(message, "content", list[dict[str, JSON]])
         if not content_blocks:
-            pwarning("Message has no content blocks.")
+            logger.warning("Message has no content blocks.")
         message["content"] = [cb for cb in content_blocks if is_content_block_valid(cb)]
 
     stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
@@ -487,9 +484,7 @@ async def verify_file_uploads(session: aiohttp.ClientSession, history: History, 
     Verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and have not been
     removed or corrupted. The updates the `uploaded_files` dictionary with the metadata of the uploaded files.
     """
-    file_upload_verification_task = asyncio.gather(
-        *(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True
-    )
+    file_upload_verification_task = asyncio.gather(*(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True)
 
     metadata_list = await file_upload_verification_task
     for metadata in metadata_list:
@@ -497,14 +492,14 @@ async def verify_file_uploads(session: aiohttp.ClientSession, history: History, 
             case {"id": str(file_id)}:
                 uploaded_files[file_id] = metadata
             case BaseException() as e:
-                perror(f"Failed to verify file upload: {e}")
+                logger.opt(exception=e).error(f"Failed to verify file upload: {e}")
             case _:
-                pwarning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
+                logger.warning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
 
     # Remove any files that were not found or had an error
     missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
     for file_id in missing_files:
-        pwarning(f"File ID `{file_id}` is missing. Please re-upload it.")
+        logger.warning(f"File ID `{file_id}` is missing. Please re-upload it.")
         del uploaded_files[file_id]
 
     erase_invalid_file_content_blocks(history, uploaded_files)
@@ -512,7 +507,7 @@ async def verify_file_uploads(session: aiohttp.ClientSession, history: History, 
 
 async def upload_file(session: aiohttp.ClientSession, file_path: str, uploaded_files: dict[str, JSON]) -> JSON:
     if not await aiofiles.os.path.isfile(file_path):
-        perror(f"File {file_path} does not exist or is not a file.")
+        logger.error(f"File {file_path} does not exist or is not a file.")
         return None
 
     result = await files.upload_file(session, file_path)
@@ -551,7 +546,7 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
     return content
 
 
-async def async_prompt(print_text_only: bool ):
+async def async_prompt(print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -601,6 +596,7 @@ def prompt(print_text_only: bool):
 
 
 def main():
+    logging.setup()
     prompt(print_text_only=False)
 
 

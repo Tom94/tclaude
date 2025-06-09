@@ -94,7 +94,8 @@ async def async_single_prompt(args: TaiArgs, history: History, user_input: str, 
 
     async with aiohttp.ClientSession() as client_session:
         async with asyncio.TaskGroup() as tg:
-            _ = tg.create_task(session.verify_file_uploads(client_session))
+            if session.uploaded_files:
+                _ = tg.create_task(session.verify_file_uploads(client_session))
             file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
@@ -140,7 +141,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
         name=deduce_session_name(args.session) if args.session else None,
     )
 
-    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))
+    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
     file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
     input = create_input(always_prefer_tty=True)

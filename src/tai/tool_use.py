@@ -18,7 +18,12 @@
 import asyncio
 import importlib
 import inspect
-from typing import Callable
+import json
+from types import UnionType
+from typing import Callable, Literal, get_args, get_origin
+
+import docstring_parser
+from loguru import logger
 
 from .common import History
 from .json import JSON, get, get_or, get_or_default
@@ -42,56 +47,123 @@ def get_available_tools() -> dict[str, Callable[[object], object]]:
         return {}
 
 
+def python_type_to_json_schema(python_type: type) -> dict[str, JSON]:
+    """Convert Python type annotation to JSON schema."""
+
+    if python_type is type(None):
+        return {"type": "null"}
+
+    basic_types = {
+        str: "string",
+        int: "integer",
+        float: "number",
+        bool: "boolean",
+        bytes: "string",
+        dict: "object",
+        list: "array",
+    }
+
+    if python_type in basic_types:
+        return {"type": basic_types[python_type]}
+
+    origin = get_origin(python_type)
+    args = get_args(python_type)
+
+    if origin is UnionType:
+        return {"anyOf": [python_type_to_json_schema(arg) for arg in args]}
+
+    if origin is list:
+        if args:
+            return {"type": "array", "items": python_type_to_json_schema(args[0])}
+        return {"type": "array"}
+
+    if origin is dict:
+        dict_schema: dict[str, JSON] = {"type": "object"}
+        if len(args) != 2:
+            logger.error(f"Dict type {python_type} must have exactly two type arguments (key and value).")
+            return {}
+
+        # dict[str, ValueType] - add pattern properties if key is string
+        if args[0] is not str:
+            logger.error(f"Unsupported dict key type: {args[0]}. Only string keys are supported for JSON Schema.")
+            return {}
+
+        dict_schema["additionalProperties"] = python_type_to_json_schema(args[1])
+        return dict_schema
+
+    if origin is Literal:
+        return {"enum": list(args)}
+
+    logger.error(f"Unsupported type: {python_type}. Please ensure it is a valid JSON schema type.")
+    return {}
+
+
+def replace_single_newlines(text: str) -> str:
+    # Replace \n that is NOT followed by another \n
+    return text.replace("\n", " ").replace("  ", "\n\n")
+
+
+def get_tool_definition(name: str, func: Callable[[object], object]) -> JSON:
+    sig = inspect.signature(func)
+    if sig.return_annotation == inspect.Signature.empty:
+        logger.error(f"Tool `{name}` has no return annotation. Claude requires a return type annotation.")
+        return None
+
+    if sig.return_annotation is not str:
+        logger.error(f"Tool `{name}` has a return type of {sig.return_annotation}, which is not supported by Claude. Must return a string.")
+        return None
+
+    doc = docstring_parser.parse(inspect.getdoc(func) or "")
+    param_descs = {param.arg_name: param.description for param in doc.params if param.description}
+
+    description: str = doc.description or "No description provided."
+    if doc.returns:
+        description += f"\n\nReturns: {doc.returns.description or 'No return description provided.'}"
+    description = replace_single_newlines(description)
+
+    # Parse parameters
+    properties: dict[str, dict[str, JSON]] = {}
+    required: list[str] = []
+
+    for param_name, param in sig.parameters.items():
+        # Try to extract type from annotation
+        if param.annotation == inspect.Parameter.empty:
+            logger.error(f"Tool `{name}` parameter `{param_name}` has no type annotation. Claude requires type annotations for all parameters.")
+            return None
+
+        schema = python_type_to_json_schema(param.annotation)
+        if not schema:
+            logger.error(f"Could not convert type `{param.annotation}` for tool `{name}` parameter `{param_name}` to JSON schema. Ensure it is a valid type.")
+            return None
+
+        schema["description"] = f"{param_name}"
+        if param_name in param_descs:
+            schema["description"] = replace_single_newlines(param_descs[param_name])
+        else:
+            logger.warning(f"Tool `{name}` parameter `{param_name}` has no description in the docstring. Claude may misunderstand the parameter's purpose.")
+
+        properties[param_name] = schema
+
+        # Add to required if no default value
+        if param.default == inspect.Parameter.empty:
+            required.append(param_name)
+
+    return {
+        "name": name,
+        "description": description,
+        "input_schema": {"type": "object", "properties": properties, "required": required},
+    }
+
+
 def get_tool_definitions() -> list[JSON]:
     """
     Generate tool definitions for Claude based on functions in tools.py.
     """
     available_tools = get_available_tools()
-    tool_definitions: list[JSON] = []
+    tool_definitions: list[JSON] = [get_tool_definition(name, func) for name, func in available_tools.items()]
+    tool_definitions = [td for td in tool_definitions if td is not None]
 
-    for name, func in available_tools.items():
-        # Get function signature and docstring
-        sig = inspect.signature(func)
-        doc = inspect.getdoc(func) or ""
-
-        # Parse parameters
-        properties: dict[str, dict[str, str]] = {}
-        required: list[str] = []
-
-        for param_name, param in sig.parameters.items():
-            param_type = "string"  # Default type
-            param_desc = f"Parameter {param_name}"
-
-            # Try to extract type from annotation
-            if param.annotation != inspect.Parameter.empty:
-                if param.annotation is str:
-                    param_type = "string"
-                elif param.annotation is int:
-                    param_type = "integer"
-                elif param.annotation is float:
-                    param_type = "number"
-                elif param.annotation is bool:
-                    param_type = "boolean"
-                elif hasattr(param.annotation, "__origin__"):
-                    # Handle generic types like List[str]
-                    if param.annotation.__origin__ is list:
-                        param_type = "array"
-                    elif param.annotation.__origin__ is dict:
-                        param_type = "object"
-
-            properties[param_name] = {"type": param_type, "description": param_desc}
-
-            # Add to required if no default value
-            if param.default == inspect.Parameter.empty:
-                required.append(param_name)
-
-        tool_def: JSON = {
-            "name": name,
-            "description": doc,
-            "input_schema": {"type": "object", "properties": properties, "required": required},
-        }
-
-        tool_definitions.append(tool_def)
+    logger.debug(f"Using tool definitions: {json.dumps(tool_definitions, indent=2)}")
 
     return tool_definitions
 

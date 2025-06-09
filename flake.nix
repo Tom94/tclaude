@@ -18,6 +18,7 @@
           aiofiles
           aiohttp
           beautifulsoup4
+          docstring-parser
           html2text
           humanize
           loguru

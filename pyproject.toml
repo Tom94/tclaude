@@ -22,6 +22,7 @@ dependencies = [
     "aiofiles",
     "aiohttp",
     "beautifulsoup4",
+    "docstring_parser",
     "html2text",
     "humanize",
     "loguru",

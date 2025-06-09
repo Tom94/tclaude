@@ -22,11 +22,14 @@ directly callable by Claude.
 
 async def fetch_url(url: str) -> str:
     """
-    Fetch the content of a URL and return it as a markdown string. The raw HTML text is cleaned up by removing script, style, and other
+    Fetch the content of a URL and transform it as a markdown string. The raw HTML text is cleaned up by removing script, style, and other
     non-content elements, followed by conversion to markdown format.
 
-    :param url: The URL to fetch.
-    :return: The content of the URL as a markdown string.
+    Args:
+        url (str): The URL to fetch.
+
+    Returns:
+        The content of the URL as a markdown string.
     """
     import aiohttp
     import html2text

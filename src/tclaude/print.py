@@ -110,8 +110,8 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
         return
 
     if tool_name == "fetch_url":
-        text = get_or(tool_result, "content", "")
-        num_lines = text.count("\n") + 1
+        content = get_or(tool_result, "content", "")
+        num_lines = content.count("\n") + 1
         result_text = f"Fetched HTML and converted it to {num_lines} lines of markdown text."
     elif tool_name == "web_search":
         results = get_or_default(tool_result, "content", list[JSON])
@@ -133,7 +133,24 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
 
         result_text = result_io.getvalue()
     else:
-        result_text = json.dumps(get_or(tool_result, "content", {}), indent=2, sort_keys=True)
+        content = get(tool_result, "content", list[JSON])
+        if content is None:
+            content = get(tool_result, "text", str)
+            if content is None:
+                content = "<unknown>"
+            content = [{"type": "text", "text": content}]
+
+        result_io = StringIO()
+        for content_block in content:
+            if result_io.tell() > 0:
+                _ = result_io.write("\n\n")
+            match content_block:
+                case {"type": "text", "text": str(text)}:
+                    _ = result_io.write(text)
+                case _:
+                    _ = result_io.write(json.dumps(content_block, indent=2, sort_keys=True))
+
+        result_text = result_io.getvalue()
 
     _ = io.write("\n")
     write_result_block("Result", result_text, io, pretty, wrap_width)
@@ -156,6 +173,9 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
 
     if kind == "tool_use":
         title = f"Tool `{name}`"
+    elif kind == "mcp_tool_use":
+        server_name = get_or(tool_use, "server_name", "<unknown>")
+        title = f"MCP tool `{name}` via {server_name}"
     elif kind == "server_tool_use":
         title = f"Server tool `{name}`"
     else:
@@ -273,7 +293,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
             i += 1
             continue
 
-        if block_type == "code_execution_tool_result" or block_type == "web_search_tool_result":
+        if block_type == "code_execution_tool_result" or block_type == "web_search_tool_result" or block_type == "mcp_tool_result":
             i += 1
             continue  # These are handled alongside the tool use
 
@@ -325,7 +345,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
 
             _ = io.write(text)
             i -= 1  # Adjust for the outer loop increment
-        elif block_type == "tool_use" or block_type == "server_tool_use":
+        elif block_type == "tool_use" or block_type == "server_tool_use" or block_type == "mcp_tool_use":
             write_tool_use(content_block, tool_results, io, pretty, wrap_width)
         elif block_type == "redacted_thinking":
             encrypted_thinking = get_or(content_block, "data", "")

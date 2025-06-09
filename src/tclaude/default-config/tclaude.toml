@@ -1,0 +1,10 @@
+[[mcp.remote_servers]]
+name = "example-mcp"
+url = "https://example-server.modelcontextprotocol.io/sse"
+# tool_configuration.enabled = true
+# tool_configuration.allowed_tools = [
+#   "example_tool_1",
+#   "example_tool_2",
+# ]
+authorization_token = "2c8f649244275f4c44124e305d0969f8858c8e3d742cc497940281aac7b1eb8d"
+

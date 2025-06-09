@@ -23,6 +23,8 @@ from importlib import resources
 
 from loguru import logger
 
+from .json import JSON
+
 
 def get_config_dir() -> str:
     """
@@ -131,7 +133,7 @@ def parse_tclaude_args():
     return args
 
 
-def load_config(filename: str | None) -> dict[str, str]:
+def load_config(filename: str | None) -> dict[str, JSON]:
     """
     Load the configuration from the tclaude.toml file located in the config directory.
     """

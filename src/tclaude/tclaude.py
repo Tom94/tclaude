@@ -59,7 +59,7 @@ def main():
 
         from . import chat
 
-        chat.single_prompt(args, history, user_input, print_text_only=True)
+        chat.single_prompt(args, config, history, user_input, print_text_only=True)
         return
 
     if history:
@@ -72,7 +72,7 @@ def main():
 
     from . import chat
 
-    chat.chat(args, history, user_input)
+    chat.chat(args, config, history, user_input)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ As such, Claude-specific features like caching, Claude-native web search or code
 
 - Interactive chat with resumable sessions, extended thinking, and tool use
   - Built-in gounded web search, code execution, and file analysis
-  - Remote and local [MCP server](https://mcpservers.org/) support
+  - Remote [MCP server](https://mcpservers.org/) support (local server support coming soon)
 - Implement any custom tool in just a few lines of Python
 - Automatic caching (makes Claude up to 10x cheaper!)
 

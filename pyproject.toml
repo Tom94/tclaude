@@ -10,6 +10,12 @@ line-length = 160
 [tool.basedpyright]
 reportIgnoreCommentWithoutRule = false
 
+[build-system]
+requires = [
+    "setuptools>=61.2.0",
+    "wheel",
+]
+
 [project]
 name = "tai"
 dynamic = ["version"]

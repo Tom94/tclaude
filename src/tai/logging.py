@@ -27,8 +27,20 @@ from .common import (
     ANSI_BOLD_YELLOW,
     ANSI_MID_GRAY,
     ANSI_RESET,
-    get_log_dir,
 )
+
+
+def get_log_dir() -> str:
+    """
+    Get the path to the configuration file.
+    """
+    if "XDG_STATE_HOME" in os.environ:
+        config_dir = os.environ["XDG_STATE_HOME"]
+    else:
+        config_dir = os.path.join(os.path.expanduser("~"), ".local", "state")
+
+    return os.path.join(config_dir, "tai")
+
 
 did_print_since_prompt = False
 

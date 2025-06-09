@@ -17,7 +17,7 @@
 import os
 import sys
 
-from . import common, logging
+from . import common, config, logging
 from .print import history_to_string, print_decoy_prompt
 
 
@@ -38,19 +38,21 @@ def main():
     logging.setup()
 
     if "ANTHROPIC_API_KEY" not in os.environ:
-        print("Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.", file=sys.stderr)
-        print("You can get an API key at https://console.anthropic.com/settings/keys", file=sys.stderr)
+        print(
+            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.\nYou can get an API key at https://console.anthropic.com/settings/keys",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    args = common.parse_tai_args()
+    args = config.parse_tai_args()
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     user_input = read_user_input(args.input)
 
     # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)
     if not os.isatty(1):
         if not user_input:
-            print("No input provided.")
-            return
+            print("No input provided.", file=sys.stderr)
+            sys.exit(1)
 
         from . import chat
 

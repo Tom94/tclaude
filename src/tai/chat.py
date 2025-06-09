@@ -26,8 +26,9 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
-from . import common
-from .common import History, TaiArgs
+from . import common, config
+from .common import History
+from .config import TaiArgs
 from .json import JSON
 from .live_print import live_print
 from .print import history_to_string
@@ -81,7 +82,7 @@ async def async_single_prompt(args: TaiArgs, history: History, user_input: str, 
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    system_prompt = common.load_system_prompt(args.role) if args.role else None
+    system_prompt = config.load_system_prompt(args.role) if args.role else None
 
     session = ChatSession(
         history=history,
@@ -130,7 +131,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
     Main function to get user input, and print Anthropic's response.
     """
 
-    system_prompt = common.load_system_prompt(args.role) if args.role else None
+    system_prompt = config.load_system_prompt(args.role) if args.role else None
     session = ChatSession(
         history=history,
         model=args.model,

@@ -25,7 +25,7 @@ from typing import cast
 from humanize import naturalsize
 from loguru import logger
 
-from . import common, logging
+from . import common, config, logging
 from .common import History, escape, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
@@ -393,7 +393,7 @@ class PrintArgs(argparse.Namespace):
     def __init__(self):
         super().__init__()
         self.session: str
-        self.sessions_dir: str = common.default_sessions_dir()
+        self.sessions_dir: str = config.default_sessions_dir()
         self.pretty: bool = False
 
 

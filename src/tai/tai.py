@@ -21,6 +21,19 @@ from . import common, logging
 from .print import history_to_string, print_decoy_prompt
 
 
+def read_user_input(input: list[str]) -> str:
+    user_input = ""
+    if not sys.stdin.isatty() and not sys.stdin.closed:
+        user_input = sys.stdin.read().strip()
+
+    if input:
+        if user_input:
+            user_input += "\n\n"
+        user_input += " ".join(input)
+
+    return user_input
+
+
 def main():
     logging.setup()
 
@@ -29,21 +42,26 @@ def main():
         print("You can get an API key at https://console.anthropic.com/settings/keys", file=sys.stderr)
         sys.exit(1)
 
-    # If stdout is not a terminal, execute in single prompt mode. No interactive chat; no progressive printing; no history.
-    if not os.isatty(1):
-        from . import chat
-
-        chat.single_prompt(print_text_only=True)
-        return
-
     args = common.parse_tai_args()
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
+    user_input = read_user_input(args.input)
+
+    # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)
+    if not os.isatty(1):
+        if not user_input:
+            print("No input provided.")
+            return
+
+        from . import chat
+
+        chat.single_prompt(args, history, user_input, print_text_only=True)
+        return
+
     if history:
         print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
 
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
-    user_input = common.read_user_input(args.input)
     if not user_input:
         print_decoy_prompt("")
 

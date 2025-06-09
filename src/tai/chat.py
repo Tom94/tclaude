@@ -77,18 +77,11 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     return results
 
 
-async def async_single_prompt(print_text_only: bool):
+async def async_single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    args = common.parse_tai_args()
-    user_input = common.read_user_input(args.input)
-    if not user_input:
-        print("No input provided.")
-        return
-
     system_prompt = common.load_system_prompt(args.role) if args.role else None
-    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
 
     session = ChatSession(
         history=history,
@@ -99,11 +92,8 @@ async def async_single_prompt(print_text_only: bool):
     )
 
     async with aiohttp.ClientSession() as client_session:
-        _, uploaded_files = common.process_user_blocks(history)
-
         async with asyncio.TaskGroup() as tg:
-            if uploaded_files:
-                _ = tg.create_task(session.verify_file_uploads(client_session))
+            _ = tg.create_task(session.verify_file_uploads(client_session))
             file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
@@ -111,11 +101,10 @@ async def async_single_prompt(print_text_only: bool):
         history.append({"role": "user", "content": user_content})
         response_idx = len(history)
 
-        call_again = True
-        while call_again:
+        while True:
             response = await stream_response(
                 session=client_session,
-                model=args.model,
+                model=session.model,
                 history=history,
                 max_tokens=args.max_tokens,
                 enable_web_search=not args.no_web_search,  # Web search is enabled by default
@@ -126,13 +115,14 @@ async def async_single_prompt(print_text_only: bool):
             )
 
             history.extend(response.messages)
-            call_again = response.call_again
+            if not response.call_again:
+                break
 
     print(history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
 
 
-def single_prompt(print_text_only: bool):
-    asyncio.run(async_single_prompt(print_text_only=print_text_only))
+def single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
+    asyncio.run(async_single_prompt(args, history, user_input, print_text_only))
 
 
 async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):

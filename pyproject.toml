@@ -36,7 +36,9 @@ tai = "tai.tai:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["tai*"]
+
+[tool.setuptools.package-data]
+tai = ["default-config/*.toml"]
 
 [tool.setuptools.dynamic]
 version = {attr = "tai.__version__"}

@@ -17,7 +17,8 @@
 import os
 import sys
 
-from . import common, config, logging
+from . import common, logging
+from .config import parse_tai_args, load_config
 from .print import history_to_string, print_decoy_prompt
 
 
@@ -44,7 +45,9 @@ def main():
         )
         sys.exit(1)
 
-    args = config.parse_tai_args()
+    args = parse_tai_args()
+    config = load_config(args.config)
+
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     user_input = read_user_input(args.input)
 

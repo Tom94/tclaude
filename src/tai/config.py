@@ -18,6 +18,8 @@
 import argparse
 import os
 import sys
+import tomllib
+from importlib import resources
 
 from loguru import logger
 
@@ -85,6 +87,7 @@ class TaiArgs(argparse.Namespace):
 
         self.input: list[str]
 
+        self.config: str = "tai.toml"
         self.file: list[str] = []
         self.max_tokens: int = 2**14  # 16k tokens
         self.model: str = "claude-sonnet-4-0"
@@ -103,6 +106,7 @@ def parse_tai_args():
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     _ = parser.add_argument("input", nargs="*", help="Input text to send to Claude")
 
+    _ = parser.add_argument("--config", help="Path to the configuration file (default: tai.toml)")
     _ = parser.add_argument("-f", "--file", action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response")
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use")
@@ -125,3 +129,29 @@ def parse_tai_args():
 
     args.model = deduce_model_name(args.model)
     return args
+
+
+def load_config(filename: str | None) -> dict[str, str]:
+    """
+    Load the configuration from the tai.toml file located in the config directory.
+    """
+    if filename is None:
+        filename = "tai.toml"
+
+    if not os.path.isfile(filename):
+        candidate = os.path.join(get_config_dir(), filename)
+        if not os.path.isfile(candidate):
+            logger.warning(f"Configuration file {filename} not found. Using default configuration.")
+            resources_path = resources.files(__package__)
+            filename = str(resources_path.joinpath("default-config", "tai.toml"))
+            # filename = os.path.join(os.path.dirname(__file__), "..", "..", "config", "tai.toml")
+        else:
+            filename = candidate
+
+    try:
+        with open(filename, "rb") as f:
+            config = tomllib.load(f)
+        return config
+    except Exception as e:
+        logger.error(f"Failed to load configuration from {filename}: {e}")
+        return {}

@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -28,7 +28,7 @@ from prompt_toolkit.output import create_output
 
 from . import common, config
 from .common import History
-from .config import TaiArgs
+from .config import TClaudeArgs
 from .json import JSON
 from .live_print import live_print
 from .print import history_to_string
@@ -78,7 +78,7 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     return results
 
 
-async def async_single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
+async def async_single_prompt(args: TClaudeArgs, history: History, user_input: str, print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -123,11 +123,11 @@ async def async_single_prompt(args: TaiArgs, history: History, user_input: str, 
     print(history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
 
 
-def single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
+def single_prompt(args: TClaudeArgs, history: History, user_input: str, print_text_only: bool):
     asyncio.run(async_single_prompt(args, history, user_input, print_text_only))
 
 
-async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
+async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, history: History, user_input: str):
     """
     Main function to get user input, and print Anthropic's response.
     """
@@ -326,10 +326,10 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
         session.total_tokens.print_cost(args.model)
 
 
-async def async_chat_wrapper(args: TaiArgs, history: History, user_input: str):
+async def async_chat_wrapper(args: TClaudeArgs, history: History, user_input: str):
     async with aiohttp.ClientSession() as session:
         await async_chat(session, args, history, user_input)
 
 
-def chat(args: TaiArgs, history: History, user_input: str):
+def chat(args: TClaudeArgs, history: History, user_input: str):
     asyncio.run(async_chat_wrapper(args, history, user_input))

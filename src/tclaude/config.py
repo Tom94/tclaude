@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -33,15 +33,15 @@ def get_config_dir() -> str:
     else:
         config_dir = os.path.join(os.path.expanduser("~"), ".config")
 
-    return os.path.join(config_dir, "tai")
+    return os.path.join(config_dir, "tclaude")
 
 
 def default_sessions_dir() -> str:
     """
     Get the default session directory.
     """
-    if "TAI_SESSIONS_DIR" in os.environ:
-        return os.environ["TAI_SESSIONS_DIR"]
+    if "TCLAUDE_SESSIONS_DIR" in os.environ:
+        return os.environ["TCLAUDE_SESSIONS_DIR"]
     return "."
 
 
@@ -77,7 +77,7 @@ def deduce_model_name(model: str) -> str:
     return model
 
 
-class TaiArgs(argparse.Namespace):
+class TClaudeArgs(argparse.Namespace):
     def __init__(self):
         super().__init__()
 
@@ -87,7 +87,7 @@ class TaiArgs(argparse.Namespace):
 
         self.input: list[str]
 
-        self.config: str = "tai.toml"
+        self.config: str = "tclaude.toml"
         self.file: list[str] = []
         self.max_tokens: int = 2**14  # 16k tokens
         self.model: str = "claude-sonnet-4-0"
@@ -102,11 +102,11 @@ class TaiArgs(argparse.Namespace):
         self.version: bool = False
 
 
-def parse_tai_args():
+def parse_tclaude_args():
     parser = argparse.ArgumentParser(description="Chat with Anthropic's Claude API")
     _ = parser.add_argument("input", nargs="*", help="Input text to send to Claude")
 
-    _ = parser.add_argument("--config", help="Path to the configuration file (default: tai.toml)")
+    _ = parser.add_argument("--config", help="Path to the configuration file (default: tclaude.toml)")
     _ = parser.add_argument("-f", "--file", action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response (default: 16384)")
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-0)")
@@ -120,11 +120,11 @@ def parse_tai_args():
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     _ = parser.add_argument("-v", "--version", action="store_true", help="Print version information and exit")
 
-    args = parser.parse_args(namespace=TaiArgs())
+    args = parser.parse_args(namespace=TClaudeArgs())
     if args.version:
         from . import __version__
 
-        print(f"tai — Terminal AI\nversion {__version__}")
+        print(f"tclaude — Claude in the terminal\nversion {__version__}")
         sys.exit(0)
 
     args.model = deduce_model_name(args.model)
@@ -133,17 +133,17 @@ def parse_tai_args():
 
 def load_config(filename: str | None) -> dict[str, str]:
     """
-    Load the configuration from the tai.toml file located in the config directory.
+    Load the configuration from the tclaude.toml file located in the config directory.
     """
     if filename is None:
-        filename = "tai.toml"
+        filename = "tclaude.toml"
 
     if not os.path.isfile(filename):
         filename = os.path.join(get_config_dir(), filename)
         if not os.path.isfile(filename):
             logger.debug(f"Configuration file {filename} not found. Using default configuration.")
             resources_path = resources.files(__package__)
-            filename = str(resources_path.joinpath("default-config", "tai.toml"))
+            filename = str(resources_path.joinpath("default-config", "tclaude.toml"))
 
     try:
         with open(filename, "rb") as f:

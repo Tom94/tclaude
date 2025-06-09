@@ -17,7 +17,7 @@ requires = [
 ]
 
 [project]
-name = "tai"
+name = "tclaude"
 dynamic = ["version"]
 description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
@@ -38,14 +38,14 @@ dependencies = [
 ]
 
 [project.scripts]
-tai = "tai.tai:main"
+tclaude = "tclaude.tclaude:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-tai = ["default-config/*.toml"]
+tclaude = ["default-config/*.toml"]
 
 [tool.setuptools.dynamic]
-version = {attr = "tai.__version__"}
+version = {attr = "tclaude.__version__"}
 

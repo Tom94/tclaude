@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import common, logging
-from .config import parse_tai_args, load_config
+from .config import parse_tclaude_args, load_config
 from .print import history_to_string, print_decoy_prompt
 
 
@@ -40,12 +40,12 @@ def main():
 
     if "ANTHROPIC_API_KEY" not in os.environ:
         print(
-            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.\nYou can get an API key at https://console.anthropic.com/settings/keys",
+            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    args = parse_tai_args()
+    args = parse_tclaude_args()
     config = load_config(args.config)
 
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []

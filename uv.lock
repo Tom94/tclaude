@@ -132,6 +132,15 @@ wheels = [
 ]
 
 [[package]]
+name = "docstring-parser"
+version = "0.16"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/12/9c22a58c0b1e29271051222d8906257616da84135af9ed167c9e28f85cb3/docstring_parser-0.16.tar.gz", hash = "sha256:538beabd0af1e2db0146b6bd3caa526c35a34d61af9fd2887f3a8a27a739aa6e", size = 26565, upload-time = "2024-03-15T10:39:44.419Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/7c/e9fcff7623954d86bdc17782036cbf715ecab1bec4847c008557affe1ca8/docstring_parser-0.16-py3-none-any.whl", hash = "sha256:bf0a1387354d3691d102edef7ec124f219ef639982d096e26e3b60aeffa90637", size = 36533, upload-time = "2024-03-15T10:39:41.527Z" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.6.2"
 source = { registry = "https://pypi.org/simple" }
@@ -429,12 +438,13 @@ wheels = [
 ]
 
 [[package]]
-name = "tai"
-source = { virtual = "." }
+name = "tclaude"
+source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "beautifulsoup4" },
+    { name = "docstring-parser" },
     { name = "html2text" },
     { name = "humanize" },
     { name = "loguru" },
@@ -448,6 +458,7 @@ requires-dist = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "beautifulsoup4" },
+    { name = "docstring-parser" },
     { name = "html2text" },
     { name = "humanize" },
     { name = "loguru" },

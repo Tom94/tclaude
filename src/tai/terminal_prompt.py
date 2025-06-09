@@ -88,11 +88,6 @@ async def terminal_prompt(
         try:
             while True:
                 await asyncio.sleep(1 / SPINNER_FPS)
-
-                if logging.did_print_since_prompt:
-                    nonlocal prefix
-                    prefix = "\n"
-
                 update_prefix()
                 prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
                 prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))

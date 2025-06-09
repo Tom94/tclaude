@@ -139,14 +139,11 @@ def load_config(filename: str | None) -> dict[str, str]:
         filename = "tai.toml"
 
     if not os.path.isfile(filename):
-        candidate = os.path.join(get_config_dir(), filename)
-        if not os.path.isfile(candidate):
+        filename = os.path.join(get_config_dir(), filename)
+        if not os.path.isfile(filename):
             logger.warning(f"Configuration file {filename} not found. Using default configuration.")
             resources_path = resources.files(__package__)
             filename = str(resources_path.joinpath("default-config", "tai.toml"))
-            # filename = os.path.join(os.path.dirname(__file__), "..", "..", "config", "tai.toml")
-        else:
-            filename = candidate
 
     try:
         with open(filename, "rb") as f:

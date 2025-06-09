@@ -141,7 +141,7 @@ def load_config(filename: str | None) -> dict[str, str]:
     if not os.path.isfile(filename):
         filename = os.path.join(get_config_dir(), filename)
         if not os.path.isfile(filename):
-            logger.warning(f"Configuration file {filename} not found. Using default configuration.")
+            logger.debug(f"Configuration file {filename} not found. Using default configuration.")
             resources_path = resources.files(__package__)
             filename = str(resources_path.joinpath("default-config", "tai.toml"))
 

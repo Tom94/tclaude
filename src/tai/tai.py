@@ -29,11 +29,11 @@ def main():
         print("You can get an API key at https://console.anthropic.com/settings/keys", file=sys.stderr)
         sys.exit(1)
 
-    # If stdout is not a terminal, execute in prompt mode. No interactive chat; no progressive printing; no history.
+    # If stdout is not a terminal, execute in single prompt mode. No interactive chat; no progressive printing; no history.
     if not os.isatty(1):
-        from . import prompt
+        from . import chat
 
-        prompt.prompt(print_text_only=True)
+        chat.single_prompt(print_text_only=True)
         return
 
     args = common.parse_tai_args()

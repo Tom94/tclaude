@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-import datetime
 import json
 import os
 import signal
@@ -34,14 +33,13 @@ from .live_print import live_print
 from .print import history_to_string
 from .prompt import (
     Response,
-    TokenCounter,
     file_metadata_to_content,
     stream_response,
-    upload_file,
-    verify_file_uploads,
 )
+from .session import ChatSession, deduce_session_name
 from .spinner import spinner
 from .terminal_prompt import terminal_prompt
+from .token_counter import TokenCounter
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -58,20 +56,6 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     )
     _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(model)
     return cache_read_cost < input_cost
-
-
-def deduce_session_name(session_file: str | None) -> str | None:
-    """
-    Deduce the session name from the command line arguments. If a session file is provided, use its basename. Otherwise, return None.
-    """
-    if session_file:
-        session_name = os.path.basename(session_file)
-        stem, ext = os.path.splitext(session_name)
-        if ext.lower() == ".json":
-            return stem
-        return session_name
-
-    return None
 
 
 async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
@@ -93,84 +77,62 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     return results
 
 
-class ChatSession:
+async def async_single_prompt(print_text_only: bool):
     """
-    Represents a chat session with a model.
-    Contains the session name and the history of messages.
+    Main function to parse arguments, get user input, and print Anthropic's response.
     """
+    args = common.parse_tai_args()
+    user_input = common.read_user_input(args.input)
+    if not user_input:
+        print("No input provided.")
+        return
 
-    def __init__(self, history: History, model: str, system_prompt: str | None = None, role: str | None = None, name: str | None = None):
-        self.history: History = history
-        self.model: str = model
-        self.system_prompt: str | None = system_prompt
-        self.role: str | None = role
-        self.name: str | None = name
+    system_prompt = common.load_system_prompt(args.role) if args.role else None
+    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
 
-        self.total_tokens: TokenCounter = TokenCounter()
-        self.autoname_task: asyncio.Task[None] | None = None
+    session = ChatSession(
+        history=history,
+        model=args.model,
+        system_prompt=system_prompt,
+        role=os.path.splitext(os.path.basename(args.role))[0] if args.role and system_prompt else None,
+        name=deduce_session_name(args.session) if args.session else None,
+    )
 
-    async def _autoname(self, client_session: aiohttp.ClientSession):
-        autoname_prompt = "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
-        autoname_history = self.history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
+    async with aiohttp.ClientSession() as client_session:
+        _, uploaded_files = common.process_user_blocks(history)
 
-        try:
+        async with asyncio.TaskGroup() as tg:
+            if uploaded_files:
+                _ = tg.create_task(session.verify_file_uploads(client_session))
+            file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
+
+        user_content: list[JSON] = [{"type": "text", "text": user_input}]
+        user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
+        history.append({"role": "user", "content": user_content})
+        response_idx = len(history)
+
+        call_again = True
+        while call_again:
             response = await stream_response(
                 session=client_session,
-                model=self.model,
-                history=autoname_history,
-                max_tokens=30,
-                enable_web_search=False,
-                system_prompt=self.system_prompt,
-                enable_thinking=False,
+                model=args.model,
+                history=history,
+                max_tokens=args.max_tokens,
+                enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                system_prompt=system_prompt,
+                enable_thinking=args.thinking,
+                thinking_budget=args.thinking_budget,
             )
 
-            self.total_tokens += response.tokens
-            session_name = history_to_string(response.messages, pretty=False)
-        except (aiohttp.ClientError, asyncio.CancelledError) as e:
-            if isinstance(e, asyncio.CancelledError):
-                logger.error("Auto-naming cancelled. Using timestamp.")
-            else:
-                logger.opt(exception=e).error(f"Error auto-naming session: {e}.")
-            session_name = datetime.datetime.now().strftime("%H-%M-%S")
+            history.extend(response.messages)
+            call_again = response.call_again
 
-        session_name = session_name.strip().lower()
-        session_name = session_name.replace("\n", "-").replace(" ", "-").replace(":", "-").replace("/", "-").strip()
-        session_name = "-".join(filter(None, session_name.split("-")))  # remove duplicate -
+    print(history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
 
-        date = datetime.datetime.now().strftime("%Y-%m-%d")
-        self.name = f"{date}-{session_name}"
-        logger.success(f"Session named {self.name}")
 
-    @property
-    def is_autonaming(self) -> bool:
-        return self.autoname_task is not None and not self.autoname_task.done()
-
-    def start_autoname_task(self, client_session: aiohttp.ClientSession):
-        if self.autoname_task is not None:
-            logger.warning("Autonaming task already running, not starting a new one.")
-            return
-
-        self.autoname_task = asyncio.create_task(self._autoname(client_session))
-
-    def cancel_autoname(self):
-        if self.autoname_task is None:
-            return
-
-        if not self.autoname_task.done():
-            _ = self.autoname_task.cancel()
-
-    async def cancel_autoname_with_date_fallback(self):
-        if self.autoname_task is None:
-            return
-
-        try:
-            if not self.autoname_task.done():
-                _ = self.autoname_task.cancel()
-            await self.autoname_task
-        except aiohttp.ClientError:
-            pass
-        except asyncio.CancelledError:
-            pass
+def single_prompt(print_text_only: bool):
+    asyncio.run(async_single_prompt(print_text_only=print_text_only))
 
 
 async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
@@ -187,22 +149,23 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
         name=deduce_session_name(args.session) if args.session else None,
     )
 
-    user_messages, uploaded_files = common.process_user_blocks(history)
-    file_upload_verification_task = asyncio.create_task(verify_file_uploads(client, history, uploaded_files)) if uploaded_files else None
-    file_upload_tasks = [asyncio.create_task(upload_file(client, f, uploaded_files)) for f in args.file if f]
+    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))
+    file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
     input = create_input(always_prefer_tty=True)
     output = create_output()
 
     prompt_session: PromptSession[str] = PromptSession(input=input, output=output)
-    for m in user_messages:
+    for m in session.user_messages:
         prompt_session.history.append_string(m)
 
     if user_input:
         prompt_session.history.append_string(user_input)
 
     def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
-        return history_to_string(messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=uploaded_files)
+        return history_to_string(
+            messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=session.uploaded_files
+        )
 
     # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
     def history_or_spinner(messages: History):
@@ -225,7 +188,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
         if file_upload_verification_task and not file_upload_verification_task.done():
             rprompt = f" verifying files {spinner()}  {rprompt}"
 
-        num_uploaded_files = sum(1 for m in uploaded_files.values() if m is not None)
+        num_uploaded_files = sum(1 for m in session.uploaded_files.values() if m is not None)
         num_uploading = sum(1 for t in file_upload_tasks if not t.done())
 
         num_total_files = num_uploaded_files + num_uploading

@@ -24,18 +24,16 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from io import StringIO
-from itertools import chain
 from typing import Callable, cast
 
-import aiofiles.os
 import aiohttp
 from loguru import logger
 from partial_json_parser import loads as partial_loads
 
-from . import common, endpoints, files, logging
+from . import common, endpoints, files
 from .common import History
 from .json import JSON, get, get_or, get_or_default
-from .print import history_to_string
+from .token_counter import TokenCounter
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -160,55 +158,6 @@ async def use_tools(messages: History) -> dict[str, JSON]:
             tool_result["is_error"] = True
 
     return {"role": "user", "content": tool_results}
-
-
-class TokenCounter:
-    def __init__(self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0):
-        self.cache_creation: int = cache_creation_input_tokens
-        self.cache_read: int = cache_read_input_tokens
-        self.input: int = input_tokens
-        self.output: int = output_tokens
-
-    def __add__(self, other: TokenCounter) -> TokenCounter:
-        result = TokenCounter()
-        result.cache_creation = self.cache_creation + other.cache_creation
-        result.cache_read = self.cache_read + other.cache_read
-        result.input = self.input + other.input
-        result.output = self.output + other.output
-        return result
-
-    def cost(self, model: str) -> tuple[float, float, float, float]:
-        cost_factor = 1.0
-        if "opus" in model:
-            cost_factor = 5.0
-        elif "haiku" in model:
-            cost_factor = 1.0 / 3.75
-            if "3-haiku" in model:
-                cost_factor *= 0.3
-
-        # See https://docs.anthropic.com/en/docs/about-claude/models/overview#model-pricing
-        price_per_minput_cache_creation = 3.75 * cost_factor
-        price_per_minput_cache_read = 0.3 * cost_factor
-        price_per_minput = 3.0 * cost_factor
-        price_per_moutput = 15.0 * cost_factor
-
-        cache_creation_cost = (self.cache_creation / 1000000) * price_per_minput_cache_creation
-        cache_read_cost = (self.cache_read / 1000000) * price_per_minput_cache_read
-        input_cost = (self.input / 1000000) * price_per_minput
-        output_cost = (self.output / 1000000) * price_per_moutput
-
-        return cache_creation_cost, cache_read_cost, input_cost, output_cost
-
-    def total_cost(self, model: str) -> float:
-        cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
-        return cache_creation_cost + cache_read_cost + input_cost + output_cost
-
-    def print_tokens(self):
-        logger.info(f"Tokens: cache_creation={self.cache_creation} cache_read={self.cache_read} input={self.input} output={self.output}")
-
-    def print_cost(self, model: str):
-        cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
-        logger.info(f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}")
 
 
 async def stream_events(session: aiohttp.ClientSession, url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
@@ -456,69 +405,6 @@ async def stream_response(
     )
 
 
-def erase_invalid_file_content_blocks(history: History, uploaded_files: dict[str, JSON]) -> None:
-    """
-    Erase all content blocks in the history that have no entry in `uploaded_files`. This is useful when we want to remove file references
-    from the history after verifying or processing them.
-    """
-
-    def is_valid_block(block: JSON) -> bool:
-        match block:
-            case {"type": "container_upload", "file_id": file_id}:
-                return file_id in uploaded_files
-            case {"type": "document" | "image", "source": {"file_id": file_id}}:
-                return file_id in uploaded_files
-            case _:  # Other block types, like text or tool use are always valid
-                return True
-
-    for message in history:
-        if get(message, "role", str) != "user":
-            continue
-
-        content = get_or_default(message, "content", list[JSON])
-        message["content"] = [block for block in content if is_valid_block(block)]
-
-
-async def verify_file_uploads(session: aiohttp.ClientSession, history: History, uploaded_files: dict[str, JSON]):
-    """
-    Verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and have not been
-    removed or corrupted. The updates the `uploaded_files` dictionary with the metadata of the uploaded files.
-    """
-    file_upload_verification_task = asyncio.gather(*(files.get_file_metadata(session, file_id) for file_id in uploaded_files.keys()), return_exceptions=True)
-
-    metadata_list = await file_upload_verification_task
-    for metadata in metadata_list:
-        match metadata:
-            case {"id": str(file_id)}:
-                uploaded_files[file_id] = metadata
-            case BaseException() as e:
-                logger.opt(exception=e).error(f"Failed to verify file upload: {e}")
-            case _:
-                logger.warning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
-
-    # Remove any files that were not found or had an error
-    missing_files = [file_id for file_id, metadata in uploaded_files.items() if not metadata]
-    for file_id in missing_files:
-        logger.warning(f"File ID `{file_id}` is missing. Please re-upload it.")
-        del uploaded_files[file_id]
-
-    erase_invalid_file_content_blocks(history, uploaded_files)
-
-
-async def upload_file(session: aiohttp.ClientSession, file_path: str, uploaded_files: dict[str, JSON]) -> JSON:
-    if not await aiofiles.os.path.isfile(file_path):
-        logger.error(f"File {file_path} does not exist or is not a file.")
-        return None
-
-    result = await files.upload_file(session, file_path)
-    file_id = get(result, "id", str)
-    if file_id is None:
-        raise RuntimeError(f"Failed to upload file {file_path}. No file ID returned.")
-
-    uploaded_files[file_id] = result
-    return result
-
-
 def file_metadata_to_content(metadata: JSON) -> list[JSON]:
     """
     Convert a file metadata JSON object to a list of content blocks that can be added to the history.
@@ -544,61 +430,3 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
 
     content.append(info)
     return content
-
-
-async def async_prompt(print_text_only: bool):
-    """
-    Main function to parse arguments, get user input, and print Anthropic's response.
-    """
-    args = common.parse_tai_args()
-    user_input = common.read_user_input(args.input)
-    if not user_input:
-        print("No input provided.")
-        return
-
-    system_prompt = common.load_system_prompt(args.role) if args.role else None
-    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
-
-    async with aiohttp.ClientSession() as session:
-        _, uploaded_files = common.process_user_blocks(history)
-
-        async with asyncio.TaskGroup() as tg:
-            if uploaded_files:
-                _ = tg.create_task(verify_file_uploads(session, history, uploaded_files))
-            file_metadata = [tg.create_task(upload_file(session, f, uploaded_files)) for f in args.file]
-
-        user_content: list[JSON] = [{"type": "text", "text": user_input}]
-        user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
-        history.append({"role": "user", "content": user_content})
-
-        call_again = True
-        while call_again:
-            response = await stream_response(
-                session=session,
-                model=args.model,
-                history=history,
-                max_tokens=args.max_tokens,
-                enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                system_prompt=system_prompt,
-                enable_thinking=args.thinking,
-                thinking_budget=args.thinking_budget,
-            )
-
-            history.extend(response.messages)
-            call_again = response.call_again
-
-    print(history_to_string(history[1:], pretty=False, text_only=print_text_only), end="", flush=True)
-
-
-def prompt(print_text_only: bool):
-    asyncio.run(async_prompt(print_text_only=print_text_only))
-
-
-def main():
-    logging.setup()
-    prompt(print_text_only=False)
-
-
-if __name__ == "__main__":
-    main()

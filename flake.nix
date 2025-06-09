@@ -30,12 +30,12 @@
         # Extract version from __init__.py
         versionFromInit = builtins.head (
           builtins.match ".*__version__ = \"([^\"]+)\".*"
-            (builtins.readFile ./src/tai/__init__.py)
+            (builtins.readFile ./src/tclaude/__init__.py)
         );
 
         # Your package derivation
-        taiProject = pythonPackages.buildPythonPackage rec {
-          pname = "tai";
+        tclaudeProject = pythonPackages.buildPythonPackage rec {
+          pname = "tclaude";
           version = versionFromInit;
           format = "pyproject";
           src = ./.;
@@ -61,7 +61,7 @@
       in
       {
         # System installation
-        packages.default = taiProject;
+        packages.default = tclaudeProject;
 
         # Development environment
         devShells.default = pkgs.mkShell {

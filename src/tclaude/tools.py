@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #

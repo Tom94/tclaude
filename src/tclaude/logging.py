@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -39,7 +39,7 @@ def get_log_dir() -> str:
     else:
         config_dir = os.path.join(os.path.expanduser("~"), ".local", "state")
 
-    return os.path.join(config_dir, "tai")
+    return os.path.join(config_dir, "tclaude")
 
 
 did_print_since_prompt = False
@@ -78,7 +78,7 @@ def setup():
         return
 
     _ = logger.add(
-        os.path.join(log_dir, "tai.log"),
+        os.path.join(log_dir, "tclaude.log"),
         level="WARNING",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
         rotation="10 MB",

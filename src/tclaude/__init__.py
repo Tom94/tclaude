@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -15,7 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-tai -- Terminal AI
+tclaude -- Claude in the terminal
 
 A complete terminal implementation of Anthropic's Claude with support for
 interactive chat, resumable sessions, extended thinking, file operations,

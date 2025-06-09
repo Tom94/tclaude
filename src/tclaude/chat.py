@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -26,10 +26,10 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
-from . import common, config
+from . import common
 from .common import History
-from .config import TaiArgs
-from .json import JSON
+from .config import TClaudeArgs, load_system_prompt
+from .json import JSON, get_or, get_or_default
 from .live_print import live_print
 from .print import history_to_string
 from .prompt import (
@@ -78,12 +78,14 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     return results
 
 
-async def async_single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
+async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
-    system_prompt = config.load_system_prompt(args.role) if args.role else None
 
+    mcp_remote_servers = get_or_default(config, "mcp_remote_servers", list[JSON])
+
+    system_prompt = load_system_prompt(args.role) if args.role else None
     session = ChatSession(
         history=history,
         model=args.model,
@@ -111,6 +113,7 @@ async def async_single_prompt(args: TaiArgs, history: History, user_input: str, 
                 max_tokens=args.max_tokens,
                 enable_web_search=not args.no_web_search,  # Web search is enabled by default
                 enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                mcp_remote_servers=mcp_remote_servers,
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
@@ -123,16 +126,39 @@ async def async_single_prompt(args: TaiArgs, history: History, user_input: str, 
     print(history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
 
 
-def single_prompt(args: TaiArgs, history: History, user_input: str, print_text_only: bool):
-    asyncio.run(async_single_prompt(args, history, user_input, print_text_only))
+def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
+    asyncio.run(async_single_prompt(args, config, history, user_input, print_text_only))
 
 
-async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: History, user_input: str):
+def validate_mcp_server(server: JSON) -> JSON:
+    """
+    Validate the MCP remote server configuration.
+    """
+    if not isinstance(server, dict):
+        raise ValueError("MCP remote server must be a dictionary.")
+
+    if "url" not in server or not isinstance(server["url"], str):
+        raise ValueError("MCP remote server must have a 'url' key with a string value.")
+
+    if "name" not in server or not isinstance(server["name"], str):
+        raise ValueError("MCP remote server must have a 'name' key with a string value.")
+
+    # The Claude API expects the server type to be "url"
+    if "type" not in server or server["type"] != "url":
+        server["type"] = "url"
+
+    return server
+
+
+async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
     """
     Main function to get user input, and print Anthropic's response.
     """
 
-    system_prompt = config.load_system_prompt(args.role) if args.role else None
+    mcp_remote_servers = get_or_default(config["mcp"], "remote_servers", list[JSON])
+    mcp_remote_servers = [validate_mcp_server(s) for s in mcp_remote_servers if get_or(s, "enabled", True)]
+
+    system_prompt = load_system_prompt(args.role) if args.role else None
     session = ChatSession(
         history=history,
         model=args.model,
@@ -262,6 +288,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
                         max_tokens=args.max_tokens,
                         enable_web_search=not args.no_web_search,  # Web search is enabled by default
                         enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                        mcp_remote_servers=mcp_remote_servers,
                         system_prompt=session.system_prompt,
                         enable_thinking=args.thinking,
                         thinking_budget=args.thinking_budget,
@@ -326,10 +353,10 @@ async def async_chat(client: aiohttp.ClientSession, args: TaiArgs, history: Hist
         session.total_tokens.print_cost(args.model)
 
 
-async def async_chat_wrapper(args: TaiArgs, history: History, user_input: str):
+async def async_chat_wrapper(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
     async with aiohttp.ClientSession() as session:
-        await async_chat(session, args, history, user_input)
+        await async_chat(session, args, config, history, user_input)
 
 
-def chat(args: TaiArgs, history: History, user_input: str):
-    asyncio.run(async_chat_wrapper(args, history, user_input))
+def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
+    asyncio.run(async_chat_wrapper(args, config, history, user_input))

@@ -1,4 +1,4 @@
-# tai -- Terminal AI
+# tclaude -- Claude in the terminal
 #
 # Copyright (C) 2025 Thomas Müller <contact@tom94.net>
 #
@@ -17,7 +17,8 @@
 import os
 import sys
 
-from . import common, config, logging
+from . import common, logging
+from .config import parse_tclaude_args, load_config
 from .print import history_to_string, print_decoy_prompt
 
 
@@ -39,12 +40,14 @@ def main():
 
     if "ANTHROPIC_API_KEY" not in os.environ:
         print(
-            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tai.\nYou can get an API key at https://console.anthropic.com/settings/keys",
+            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    args = config.parse_tai_args()
+    args = parse_tclaude_args()
+    config = load_config(args.config)
+
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     user_input = read_user_input(args.input)
 
@@ -56,7 +59,7 @@ def main():
 
         from . import chat
 
-        chat.single_prompt(args, history, user_input, print_text_only=True)
+        chat.single_prompt(args, config, history, user_input, print_text_only=True)
         return
 
     if history:
@@ -69,7 +72,7 @@ def main():
 
     from . import chat
 
-    chat.chat(args, history, user_input)
+    chat.chat(args, config, history, user_input)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ As such, Claude-specific features like caching, Claude-native web search or code
 ### Highlights
 
 - Interactive chat with resumable sessions, extended thinking, and tool use
-  - Built-in gounded web search, code execution, and file analysis
-  - Remote [MCP server](https://mcpservers.org/) support (local server support coming soon)
+    - Built-in gounded web search, code execution, and file analysis
+    - Remote [MCP server](https://mcpservers.org/) support (local server support coming soon)
 - Implement any custom tool in just a few lines of Python
 - Automatic caching (makes Claude up to 10x cheaper!)
 
@@ -88,6 +88,27 @@ tclaude --role pirate.md "How do I make great pasta?"
 
 Simply implement your tool as a function in `src/tclaude/tools.py` and it will be callable by Claude.
 Make sure to [document](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/implement-tool-use#best-practices-for-tool-definitions) the tools' function thoroughly such that Claude uses it optimally.
+
+### MCP server support
+
+To connect **tclaude** to remote [MCP servers](https://mcpservers.org/), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authorization tokens:
+
+```toml
+[[mcp.remote_servers]]
+name = "example-mcp"
+url = "https://example-server.modelcontextprotocol.io/sse"
+authorization_token = "2c8f649244275f4c44124e305d0969f8858c8e3d742cc497940281aac7b1eb8d"
+# Optional: restrict the tools that can be used with this MCP server
+# tool_configuration.enabled = true
+# tool_configuration.allowed_tools = [
+#   "example_tool_1",
+#   "example_tool_2",
+# ]
+
+[[mcp.remote_servers]]
+name = "another-mcp-server"
+url = "..."
+```
 
 ## License
 

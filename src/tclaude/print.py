@@ -415,19 +415,22 @@ class PrintArgs(argparse.Namespace):
         self.session: str
         self.sessions_dir: str = config.default_sessions_dir()
         self.pretty: bool = False
+        self.verbose: bool = False
 
 
 def main():
     """
     Main function to parse arguments, load a JSON file containing conversation history, and print it.
     """
-    logging.setup()
     parser = argparse.ArgumentParser(description="Print conversation history from a JSON file")
     _ = parser.add_argument("session", help="Path to JSON file containing conversation history to print")
     _ = parser.add_argument("--sessions-dir", help="Path to directory for session files")
     _ = parser.add_argument("-p", "--pretty", action="store_true", help="Pretty print the conversation history using bat")
+    _ = parser.add_argument("--verbose", action="store_true", help="Verbose logging")
 
     args = parser.parse_args(namespace=PrintArgs())
+
+    logging.setup(args.verbose)
 
     # Load the history from the JSON file
     try:

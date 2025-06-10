@@ -3,8 +3,13 @@
 # [[mcp.remote_servers]]
 # name = "example-mcp"
 # url = "https://example-server.modelcontextprotocol.io/sse"
-# authorization_token = "<your-authorization-token>"
+
+# authentication = "oauth2" # opens a browser window to authenticate on first use
+# or: authentication = "none"
+# or: authentication = "token", authorization_token = "<your-authorization-token>"
+
 # Optional: restrict the tools that can be used with this MCP server
+# authorization_token = "<your-authorization-token>"
 # tool_configuration.enabled = true
 # tool_configuration.allowed_tools = [
 #   "example_tool_1",
@@ -14,4 +19,3 @@
 # [[mcp.remote_servers]]
 # name = "another-mcp"
 # ...
-

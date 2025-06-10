@@ -21,7 +21,9 @@
           docstring-parser
           html2text
           humanize
+          keyring
           loguru
+          oauthlib
           partial-json-parser
           prompt_toolkit
           wcwidth

@@ -36,8 +36,6 @@ def read_user_input(input: list[str]) -> str:
 
 
 def main():
-    logging.setup()
-
     if "ANTHROPIC_API_KEY" not in os.environ:
         print(
             "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys",
@@ -46,6 +44,8 @@ def main():
         sys.exit(1)
 
     args = parse_tclaude_args()
+    logging.setup(verbose=args.verbose)
+
     config = load_config(args.config)
 
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []

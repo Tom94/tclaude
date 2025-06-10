@@ -36,6 +36,8 @@ def ansi(cmd: str) -> str:
 
 ANSI_MID_GRAY = ansi("0;38;5;245m")
 ANSI_BOLD_YELLOW = ansi("1;33m")
+ANSI_BOLD_PURPLE = ansi("1;35m")
+ANSI_BOLD_CYAN = ansi("1;36m")
 ANSI_BOLD_BRIGHT_RED = ansi("1;91m")
 ANSI_RESET = ansi("0m")
 ANSI_BEGINNING_OF_LINE = ansi("1G")
@@ -61,6 +63,30 @@ def input_style(msg: str) -> str:
 
 def escape(text: str) -> str:
     return repr(text.strip().replace("\n", " ").replace("\r", "").replace("\t", " "))
+
+
+def get_cache_dir() -> str:
+    """
+    Get the path to the cache directory.
+    """
+    if "XDG_CACHE_HOME" in os.environ:
+        cache_dir = os.environ["XDG_CACHE_HOME"]
+    else:
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache")
+
+    return os.path.join(cache_dir, "tclaude")
+
+
+def get_state_dir() -> str:
+    """
+    Get the path to the configuration file.
+    """
+    if "XDG_STATE_HOME" in os.environ:
+        config_dir = os.environ["XDG_STATE_HOME"]
+    else:
+        config_dir = os.path.join(os.path.expanduser("~"), ".local", "state")
+
+    return os.path.join(config_dir, "tclaude")
 
 
 @dataclass

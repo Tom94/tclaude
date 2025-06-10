@@ -64,7 +64,7 @@ async def stream_response(
     max_tokens: int = 16384,
     enable_web_search: bool = True,
     enable_code_exec: bool = True,
-    mcp_remote_servers: list[JSON] | None = None,
+    mcp_remote_servers: list[dict[str, JSON]] | None = None,
     system_prompt: str | None = None,
     enable_thinking: bool = False,
     thinking_budget: int | None = None,

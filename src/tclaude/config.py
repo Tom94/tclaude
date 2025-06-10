@@ -23,7 +23,7 @@ from importlib import resources
 
 from loguru import logger
 
-from .json import JSON
+from .json import JSON, get_or_default
 
 
 def get_config_dir() -> str:
@@ -154,3 +154,42 @@ def load_config(filename: str | None) -> dict[str, JSON]:
     except Exception as e:
         logger.error(f"Failed to load configuration from {filename}: {e}")
         return {}
+
+
+def validate_mcp_server(server: JSON) -> dict[str, JSON]:
+    """
+    Validate the MCP remote server configuration.
+    """
+    if not isinstance(server, dict):
+        raise ValueError("MCP remote server must be a dictionary.")
+
+    if "url" not in server or not isinstance(server["url"], str):
+        raise ValueError("MCP remote server must have a 'url' key with a string value.")
+
+    if "name" not in server or not isinstance(server["name"], str):
+        raise ValueError("MCP remote server must have a 'name' key with a string value.")
+
+    # The Claude API expects the server type to be "url"
+    if "type" not in server or server["type"] != "url":
+        server["type"] = "url"
+
+    return server
+
+
+class McpConfig:
+    def __init__(self, remote_servers: list[dict[str, JSON]], local_servers: list[dict[str, JSON]]):
+        self.remote_servers: list[dict[str, JSON]] = remote_servers
+        self.local_servers: list[dict[str, JSON]] = local_servers
+
+
+def get_mcp_config(config: dict[str, JSON]) -> McpConfig | None:
+    """
+    Get the MCP configuration from the loaded config.
+    """
+    if "mcp" not in config:
+        return None
+
+    remote_servers = [validate_mcp_server(s) for s in get_or_default(config["mcp"], "remote_servers", list[JSON])]
+    local_servers = [validate_mcp_server(s) for s in get_or_default(config["mcp"], "local_servers", list[JSON])]
+
+    return McpConfig(remote_servers=remote_servers, local_servers=local_servers)

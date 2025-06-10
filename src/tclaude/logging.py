@@ -24,22 +24,13 @@ from loguru import logger
 
 from .common import (
     ANSI_BOLD_BRIGHT_RED,
+    ANSI_BOLD_PURPLE,
+    ANSI_BOLD_CYAN,
     ANSI_BOLD_YELLOW,
     ANSI_MID_GRAY,
     ANSI_RESET,
+    get_state_dir,
 )
-
-
-def get_log_dir() -> str:
-    """
-    Get the path to the configuration file.
-    """
-    if "XDG_STATE_HOME" in os.environ:
-        config_dir = os.environ["XDG_STATE_HOME"]
-    else:
-        config_dir = os.path.join(os.path.expanduser("~"), ".local", "state")
-
-    return os.path.join(config_dir, "tclaude")
 
 
 did_print_since_prompt = False
@@ -51,7 +42,11 @@ def pprint(message: loguru.Message):
 
     level = message.record["level"]
     prefix = f"\r\033[2K{ANSI_MID_GRAY}"
-    if level.name == "SUCCESS":
+    if level.name == "TRACE":
+        prefix += f"[{ANSI_BOLD_CYAN}t{ANSI_MID_GRAY}] "
+    elif level.name == "DEBUG":
+        prefix += f"[{ANSI_BOLD_PURPLE}d{ANSI_MID_GRAY}] "
+    elif level.name == "SUCCESS":
         prefix += "[✓] "
     elif level.name == "WARNING":
         prefix += f"[{ANSI_BOLD_YELLOW}w{ANSI_MID_GRAY}] "
@@ -59,18 +54,18 @@ def pprint(message: loguru.Message):
         prefix += f"[{ANSI_BOLD_BRIGHT_RED}e{ANSI_MID_GRAY}] "
     elif level.name == "CRITICAL":
         prefix += f"[{ANSI_BOLD_BRIGHT_RED}c{ANSI_MID_GRAY}] "
-    print(f"{prefix}{message.record['message']}{ANSI_RESET}", file=sys.stdout if message.record["level"].no < 30 else sys.stderr)
+    print(f"{prefix}{message.record['message']}{ANSI_RESET}", file=sys.stderr)
 
 
-def setup():
+def setup(verbose: bool):
     """
     Set up the logging configuration for the application. This function configures the logger to print messages in a plain format.
     """
     logger.remove()  # Remove any existing handlers
 
-    _ = logger.add(pprint, level="INFO", format=f"{ANSI_MID_GRAY}{{message}}{ANSI_RESET}", backtrace=False, diagnose=False)
+    _ = logger.add(pprint, level="TRACE" if verbose else "INFO", format=f"{ANSI_MID_GRAY}{{message}}{ANSI_RESET}", backtrace=False, diagnose=False)
 
-    log_dir = get_log_dir()
+    log_dir = get_state_dir()
     try:
         os.makedirs(log_dir, exist_ok=True)
     except OSError as e:

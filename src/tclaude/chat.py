@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import signal
+from contextlib import AsyncExitStack
 from itertools import chain
 
 import aiohttp
@@ -31,7 +32,7 @@ from .common import History
 from .config import TClaudeArgs, load_system_prompt
 from .json import JSON
 from .live_print import live_print
-from .mcp import get_mcp_config
+from .mcp import setup_mcp
 from .print import history_to_string
 from .prompt import (
     Response,
@@ -42,6 +43,7 @@ from .session import ChatSession, deduce_session_name
 from .spinner import spinner
 from .terminal_prompt import terminal_prompt
 from .token_counter import TokenCounter
+from .tool_use import get_python_tools
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -93,17 +95,25 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
         name=deduce_session_name(args.session) if args.session else None,
     )
 
-    async with aiohttp.ClientSession() as client_session:
+    async with AsyncExitStack() as stack:
+        client_session: aiohttp.ClientSession = await stack.enter_async_context(aiohttp.ClientSession())
+
         async with asyncio.TaskGroup() as tg:
             if session.uploaded_files:
                 _ = tg.create_task(session.verify_file_uploads(client_session))
             file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
-            mcp = await get_mcp_config(client_session, config)
+            mcp = await stack.enter_async_context(setup_mcp(client_session, config))
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
         user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
         history.append({"role": "user", "content": user_content})
         response_idx = len(history)
+
+        available_tools, tool_definitions = get_python_tools()
+
+        mcp_tools, mcp_tool_definitions = mcp.get_tools()
+        available_tools.update(mcp_tools)
+        tool_definitions.extend(mcp_tool_definitions)
 
         while True:
             response = await stream_response(
@@ -113,6 +123,8 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
                 max_tokens=args.max_tokens,
                 enable_web_search=not args.no_web_search,  # Web search is enabled by default
                 enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                external_tools_available=available_tools,
+                external_tool_definitions=tool_definitions,
                 mcp_remote_servers=await mcp.get_remote_server_descs(client_session),
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
@@ -130,12 +142,10 @@ def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, 
     asyncio.run(async_single_prompt(args, config, history, user_input, print_text_only))
 
 
-async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
+async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
     """
     Main function to get user input, and print Anthropic's response.
     """
-
-    mcp = await get_mcp_config(client, config)
 
     system_prompt = load_system_prompt(args.role) if args.role else None
     session = ChatSession(
@@ -146,165 +156,184 @@ async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: d
         name=deduce_session_name(args.session) if args.session else None,
     )
 
-    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
-    file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
+    async with AsyncExitStack() as stack:
+        client = await stack.enter_async_context(aiohttp.ClientSession())
 
-    input = create_input(always_prefer_tty=True)
-    output = create_output()
+        file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
+        file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
-    prompt_session: PromptSession[str] = PromptSession(input=input, output=output)
-    for m in session.user_messages:
-        prompt_session.history.append_string(m)
+        mcp = await stack.enter_async_context(setup_mcp(client, config))
 
-    if user_input:
-        prompt_session.history.append_string(user_input)
+        input = create_input(always_prefer_tty=True)
+        output = create_output()
 
-    def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
-        return history_to_string(
-            messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=session.uploaded_files
-        )
+        prompt_session: PromptSession[str] = PromptSession(input=input, output=output)
+        for m in session.user_messages:
+            prompt_session.history.append_string(m)
 
-    # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-    def history_or_spinner(messages: History):
-        current_message = pretty_history_to_string(messages, skip_user_text=True)
-        return current_message if current_message else f"{spinner()} "
+        if user_input:
+            prompt_session.history.append_string(user_input)
 
-    def lprompt(prefix: str) -> str:
-        return f"{prefix}{common.prompt_style(common.CHEVRON)} "
+        def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
+            return history_to_string(
+                messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=session.uploaded_files
+            )
 
-    def rprompt(prefix: str) -> str:
-        rprompt = f"{session.total_tokens.total_cost(session.model):.03f}   {common.friendly_model_name(session.model)} "
-        if session.role:
-            rprompt = f"󱜙 {session.role}  {rprompt}"
+        # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
+        def history_or_spinner(messages: History):
+            current_message = pretty_history_to_string(messages, skip_user_text=True)
+            return current_message if current_message else f"{spinner()} "
 
-        if session.name is not None:
-            rprompt = f" {session.name}  {rprompt}"
-        elif session.is_autonaming:
-            rprompt = f" auto-naming {spinner()}  {rprompt}"
+        def lprompt(prefix: str) -> str:
+            return f"{prefix}{common.prompt_style(common.CHEVRON)} "
 
-        if file_upload_verification_task and not file_upload_verification_task.done():
-            rprompt = f" verifying files {spinner()}  {rprompt}"
+        def rprompt(prefix: str) -> str:
+            rprompt = f"{session.total_tokens.total_cost(session.model):.03f}   {common.friendly_model_name(session.model)} "
+            if session.role:
+                rprompt = f"󱜙 {session.role}  {rprompt}"
 
-        num_uploaded_files = sum(1 for m in session.uploaded_files.values() if m is not None)
-        num_uploading = sum(1 for t in file_upload_tasks if not t.done())
+            if session.name is not None:
+                rprompt = f" {session.name}  {rprompt}"
+            elif session.is_autonaming:
+                rprompt = f" auto-naming {spinner()}  {rprompt}"
 
-        num_total_files = num_uploaded_files + num_uploading
+            if file_upload_verification_task and not file_upload_verification_task.done():
+                rprompt = f" verifying files {spinner()}  {rprompt}"
 
-        if num_uploaded_files < num_total_files:
-            rprompt = f" {num_uploaded_files}/{num_total_files} files {spinner()}  {rprompt}"
-        elif num_uploaded_files > 0:
-            rprompt = f" {num_uploaded_files} files  {rprompt}"
+            num_uploaded_files = sum(1 for m in session.uploaded_files.values() if m is not None)
+            num_uploading = sum(1 for t in file_upload_tasks if not t.done())
 
-        return f"{prefix}{rprompt}"
+            num_total_files = num_uploaded_files + num_uploading
 
-    stream_task: asyncio.Task[Response] | None = None
+            if num_uploaded_files < num_total_files:
+                rprompt = f" {num_uploaded_files}/{num_total_files} files {spinner()}  {rprompt}"
+            elif num_uploaded_files > 0:
+                rprompt = f" {num_uploaded_files} files  {rprompt}"
 
-    # Not every request is going to be a user turn (where the user inputs text into a prompt). For example, if the response was paused
-    # before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use"), it isn't the user's turn, but we
-    # still need to make a request to the model to continue the conversation. This is what this variable is for.
-    is_user_turn = True
+            # if mcp_setup_task and not mcp_setup_task.done():
+            #     rprompt = f" setting up mcp {spinner()}  {rprompt}"
 
-    # Our repl session is meant to resemble a shell, hence we don't want Ctrl-C to exit but rather cancel the current response, which
-    # roughly equates to pressing Ctrl-C in a shell to stop the current command.
-    def interrupt_handler(_signum: int, _frame: object):
-        if stream_task and not stream_task.done():
-            _ = stream_task.cancel()
-            return
+            return f"{prefix}{rprompt}"
 
-        # If there's no conversation to cancel, the user likely wants to cancel the autonaming task.
-        session.cancel_autoname()
+        stream_task: asyncio.Task[Response] | None = None
 
-    _ = signal.signal(signal.SIGINT, interrupt_handler)
+        # Not every request is going to be a user turn (where the user inputs text into a prompt). For example, if the response was paused
+        # before (stop_reason == "pause_turn") or we are providing tool results (stop_reason == "tool_use"), it isn't the user's turn, but we
+        # still need to make a request to the model to continue the conversation. This is what this variable is for.
+        is_user_turn = True
 
-    response: Response | None = None
-    while True:
-        if is_user_turn:
-            try:
-                user_input = await terminal_prompt(lprompt, rprompt, prompt_session, user_input)
-            except EOFError:
-                break
-            except KeyboardInterrupt:
-                continue
-            if not user_input:
-                continue
+        # Our repl session is meant to resemble a shell, hence we don't want Ctrl-C to exit but rather cancel the current response, which
+        # roughly equates to pressing Ctrl-C in a shell to stop the current command.
+        def interrupt_handler(_signum: int, _frame: object):
+            if stream_task and not stream_task.done():
+                _ = stream_task.cancel()
+                return
 
-            if file_upload_verification_task:
-                async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
-                    await file_upload_verification_task
+            # If there's no conversation to cancel, the user likely wants to cancel the autonaming task.
+            session.cancel_autoname()
 
-            async with live_print(lambda: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
-                file_metadata = await gather_file_uploads(file_upload_tasks)
-            file_upload_tasks.clear()
+        _ = signal.signal(signal.SIGINT, interrupt_handler)
 
-            user_content: list[JSON] = [{"type": "text", "text": user_input}]
-            user_content.extend(chain.from_iterable(file_metadata_to_content(m) for m in file_metadata if m))
-            user_input = ""
+        available_tools, tool_definitions = get_python_tools()
 
-            session.history.append({"role": "user", "content": user_content})
+        mcp_tools, mcp_tool_definitions = mcp.get_tools()
+        available_tools.update(mcp_tools)
+        tool_definitions.extend(mcp_tool_definitions)
 
-            # This includes things like file uploads, but *not* the user input text itself, which is already printed in the prompt.
-            user_history_string = pretty_history_to_string(session.history[-1:], skip_user_text=True)
-            if user_history_string:
-                print(user_history_string, end="\n\n")
+        logger.debug(f"Available tools: {', '.join(available_tools.keys())}")
 
-        container = common.get_latest_container(session.history)
-        write_cache = should_cache(response.tokens, args.model) if response is not None else False
-
-        if args.verbose:
-            if container is not None:
-                logger.info(f"Reusing code execution container `{container.id}`")
-
-            logger.info(f"write_cache={write_cache}")
-
-        partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
-        try:
-            async with live_print(lambda: history_or_spinner(partial.messages), transient=False):
-                stream_task = asyncio.create_task(
-                    stream_response(
-                        session=client,
-                        model=args.model,
-                        history=session.history,
-                        max_tokens=args.max_tokens,
-                        enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                        enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                        mcp_remote_servers=await mcp.get_remote_server_descs(client),
-                        system_prompt=session.system_prompt,
-                        enable_thinking=args.thinking,
-                        thinking_budget=args.thinking_budget,
-                        write_cache=write_cache,
-                        on_response_update=lambda r: partial.__setattr__("messages", r.messages),
-                    )
-                )
-
-                response = await stream_task
-
-                is_user_turn = not response.call_again
-        except (aiohttp.ClientError, asyncio.CancelledError) as e:
+        response: Response | None = None
+        logger.debug("Started up.")
+        while True:
             if is_user_turn:
-                _ = session.history.pop()
-            is_user_turn = True
+                try:
+                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session, user_input)
+                except EOFError:
+                    break
+                except KeyboardInterrupt:
+                    continue
+                if not user_input:
+                    continue
+
+                if file_upload_verification_task:
+                    async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
+                        await file_upload_verification_task
+
+                async with live_print(lambda: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
+                    file_metadata = await gather_file_uploads(file_upload_tasks)
+                file_upload_tasks.clear()
+
+                user_content: list[JSON] = [{"type": "text", "text": user_input}]
+                user_content.extend(chain.from_iterable(file_metadata_to_content(m) for m in file_metadata if m))
+                user_input = ""
+
+                session.history.append({"role": "user", "content": user_content})
+
+                # This includes things like file uploads, but *not* the user input text itself, which is already printed in the prompt.
+                user_history_string = pretty_history_to_string(session.history[-1:], skip_user_text=True)
+                if user_history_string:
+                    print(user_history_string, end="\n\n")
+
+            container = common.get_latest_container(session.history)
+            write_cache = should_cache(response.tokens, args.model) if response is not None else False
+
+            if args.verbose:
+                if container is not None:
+                    logger.info(f"Reusing code execution container `{container.id}`")
+
+                logger.info(f"write_cache={write_cache}")
+
+            partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
+            try:
+                async with live_print(lambda: history_or_spinner(partial.messages), transient=False):
+                    stream_task = asyncio.create_task(
+                        stream_response(
+                            session=client,
+                            model=args.model,
+                            history=session.history,
+                            max_tokens=args.max_tokens,
+                            enable_web_search=not args.no_web_search,  # Web search is enabled by default
+                            enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                            external_tools_available=available_tools,
+                            external_tool_definitions=tool_definitions,
+                            mcp_remote_servers=await mcp.get_remote_server_descs(client),
+                            system_prompt=session.system_prompt,
+                            enable_thinking=args.thinking,
+                            thinking_budget=args.thinking_budget,
+                            write_cache=write_cache,
+                            on_response_update=lambda r: partial.__setattr__("messages", r.messages),
+                        )
+                    )
+
+                    response = await stream_task
+
+                    is_user_turn = not response.call_again
+            except (aiohttp.ClientError, asyncio.CancelledError) as e:
+                if is_user_turn:
+                    _ = session.history.pop()
+                is_user_turn = True
+
+                print("\n")
+                if isinstance(e, asyncio.CancelledError):
+                    logger.error("Response cancelled.\n")
+                else:
+                    logger.opt(exception=e).error(f"Unexpected error: {e}. Please try again.\n")
+
+                continue
+            finally:
+                stream_task = None
+
+            session.history.extend(response.messages)
+            session.total_tokens += response.tokens
 
             print("\n")
-            if isinstance(e, asyncio.CancelledError):
-                logger.error("Response cancelled.\n")
-            else:
-                logger.opt(exception=e).error(f"Unexpected error: {e}. Please try again.\n")
+            if args.verbose:
+                response.tokens.print_tokens()
+                response.tokens.print_cost(args.model)
 
-            continue
-        finally:
-            stream_task = None
-
-        session.history.extend(response.messages)
-        session.total_tokens += response.tokens
-
-        print("\n")
-        if args.verbose:
-            response.tokens.print_tokens()
-            response.tokens.print_cost(args.model)
-
-        # Start a background task to auto-name the session if it is not already named
-        if is_user_turn and session.name is None and not session.is_autonaming:
-            session.start_autoname_task(client)
+            # Start a background task to auto-name the session if it is not already named
+            if is_user_turn and session.name is None and not session.is_autonaming:
+                session.start_autoname_task(client)
 
     print()
 
@@ -332,10 +361,5 @@ async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: d
         session.total_tokens.print_cost(args.model)
 
 
-async def async_chat_wrapper(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
-    async with aiohttp.ClientSession() as session:
-        await async_chat(session, args, config, history, user_input)
-
-
 def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
-    asyncio.run(async_chat_wrapper(args, config, history, user_input))
+    asyncio.run(async_chat(args, config, history, user_input))

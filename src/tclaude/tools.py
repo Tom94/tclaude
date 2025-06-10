@@ -20,7 +20,23 @@ directly callable by Claude.
 """
 
 
-async def fetch_url(url: str) -> str:
+
+
+class ToolContentText:
+    def __init__(self, text: str):
+        self.text: str = text
+
+
+class ToolContentBase64Image:
+    def __init__(self, data: str, type: str):
+        self.data: str = data
+        self.type: str = type
+
+
+type ToolResult = list[ToolContentText | ToolContentBase64Image]
+
+
+async def fetch_url(url: str) -> ToolResult:
     """
     Fetch the content of a URL and transform it as a markdown string. The raw HTML text is cleaned up by removing script, style, and other
     non-content elements, followed by conversion to markdown format.
@@ -58,4 +74,4 @@ async def fetch_url(url: str) -> str:
             h.mark_code = True
 
             markdown = h.handle(cleaned_html)
-            return markdown
+            return [ToolContentText(markdown)]

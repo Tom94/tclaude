@@ -25,12 +25,13 @@ from typing import Callable, cast
 
 import aiohttp
 from loguru import logger
-from partial_json_parser import loads as partial_loads
+from partial_json_parser import loads as ploads  # pyright: ignore
 
 from . import common, endpoints, files, tool_use
 from .common import History
 from .json import JSON, get, get_or, get_or_default
 from .token_counter import TokenCounter
+from .tool_use import AvailableTools
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5
@@ -64,6 +65,8 @@ async def stream_response(
     max_tokens: int = 16384,
     enable_web_search: bool = True,
     enable_code_exec: bool = True,
+    external_tools_available: AvailableTools | None = None,
+    external_tool_definitions: list[JSON] | None = None,
     mcp_remote_servers: list[dict[str, JSON]] | None = None,
     system_prompt: str | None = None,
     enable_thinking: bool = False,
@@ -154,8 +157,8 @@ async def stream_response(
         code_exec_tool: JSON = {"type": "code_execution_20250522", "name": "code_execution"}
         tools.append(code_exec_tool)
 
-    # Add dynamically loaded tools from tools.py
-    tools.extend(tool_use.tool_definitions)
+    if external_tool_definitions is not None:
+        tools.extend(external_tool_definitions)
 
     if tools:
         params["tools"] = tools
@@ -231,7 +234,7 @@ async def stream_response(
 
                             if tuj.tell() > 0:
                                 try:
-                                    content_block["input"] = partial_loads(tuj.getvalue())
+                                    content_block["input"] = ploads(tuj.getvalue())
                                 except Exception:
                                     pass
                         case _:
@@ -275,7 +278,7 @@ async def stream_response(
         call_again = True
     elif stop_reason == "tool_use":
         call_again = True
-        messages.append(await tool_use.use_tools(messages))
+        messages.append(await tool_use.use_tools(external_tools_available or {}, messages))
     else:
         call_again = False
 

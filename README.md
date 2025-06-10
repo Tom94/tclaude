@@ -9,7 +9,7 @@ As such, Claude-specific features like caching, Claude-native web search or code
 
 - Interactive chat with resumable sessions, extended thinking, and tool use
     - Built-in gounded web search, code execution, and file analysis
-    - Remote [MCP server](https://mcpservers.org/) support (local server support coming soon)
+    - [MCP server](https://mcpservers.org/) support (both remote and local)
 - Implement any custom tool in just a few lines of Python
 - Automatic caching (makes Claude up to 10x cheaper!)
 
@@ -91,9 +91,35 @@ Make sure to [document](https://docs.anthropic.com/en/docs/agents-and-tools/tool
 
 ### MCP server support
 
-To connect **tclaude** to [remote MCP servers](https://mcpservers.org/remote-mcp-servers), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authentication info:
+To connect **tclaude** to [MCP servers](https://mcpservers.org), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authentication info.
+Two kinds of servers are supported:
+
+1. Remote servers (e.g. [remote-mcp-servers](https://mcpservers.org/remote-mcp-servers))
+
+- Claude will connect directly to the server and use the tools it provides. The connection is not made by your machine.
+- Remote servers are useful for tools that require a lot of resources or need to be run in a specific environment (e.g. managing your GitHub projects).
+- If the server needs authentication, it can be done via OAuth2 or a custom token.
+
+2. Local servers (running on your machine or in an internal network)
+
+- **tclaude** will connect to the MCP server via your machine and forward the tools to Claude.
+- Local servers are useful for tools that require access to local resources (e.g. files on your machine or private data).
+- Authentication is not supported for local servers. **tclaude** assumes that, if you have access to a local server, you are authorized to use it.
+- Two protocols are supported: STDIN (**tclaude** starts the server and pipes the input to it) and HTTPS (**tclaude** connects to the server via a URL).
+
+Example MCP configuration for `~/.configs/tclaude/tclaude.toml`:
 
 ```toml
+[[mcp.local_servers]]
+name = "filesystem"
+command = "npx" # launches the MCP server via a connects via STDIN
+args = [
+    "-y",
+    "@modelcontextprotocol/server-filesystem",
+    "~", # access to the home directory
+]
+# or: url = "http://localhost:3000" # if the server is already running
+
 [[mcp.remote_servers]]
 name = "example-mcp"
 url = "https://example-server.modelcontextprotocol.io/sse"

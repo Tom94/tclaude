@@ -14,29 +14,34 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# This file deals with runtime reflection and, as such, has to use the Any type in some places.
+# pyright: reportAny=false, reportExplicitAny=false
 
 import asyncio
 import importlib
 import inspect
-import json
+from collections.abc import Coroutine
 from types import UnionType
-from typing import Callable, Literal, get_args, get_origin
+from typing import Any, Callable, Literal, get_args, get_origin
 
 import docstring_parser
 from loguru import logger
 
 from .common import History
 from .json import JSON, get, get_or, get_or_default
+from .tools import ToolContentText, ToolResult
+
+type AvailableTools = dict[str, Callable[..., Coroutine[None, None, ToolResult]]]
 
 
-def get_available_tools() -> dict[str, Callable[[object], object]]:
+def get_available_tools() -> AvailableTools:
     """
     Dynamically import tools.py and extract all callable functions.
     Returns a dictionary mapping function names to their callable objects.
     """
     try:
         tools_module = importlib.import_module(".tools", package=__package__)
-        available_tools: dict[str, Callable[[object], object]] = {}
+        available_tools: AvailableTools = {}
 
         for name, obj in inspect.getmembers(tools_module):
             if inspect.isfunction(obj) and not name.startswith("_"):
@@ -47,7 +52,7 @@ def get_available_tools() -> dict[str, Callable[[object], object]]:
         return {}
 
 
-def python_type_to_json_schema(python_type: type) -> dict[str, JSON]:
+def python_type_to_json_schema(python_type: Any) -> dict[str, JSON]:
     """Convert Python type annotation to JSON schema."""
 
     if python_type is type(None):
@@ -103,14 +108,14 @@ def replace_single_newlines(text: str) -> str:
     return text.replace("\n", " ").replace("  ", "\n\n")
 
 
-def get_tool_definition(name: str, func: Callable[[object], object]) -> JSON:
+def extract_tool_definition_from_signature(name: str, func: Callable[..., object]) -> JSON:
     sig = inspect.signature(func)
     if sig.return_annotation == inspect.Signature.empty:
         logger.error(f"Tool `{name}` has no return annotation. Claude requires a return type annotation.")
         return None
 
-    if sig.return_annotation is not str:
-        logger.error(f"Tool `{name}` has a return type of {sig.return_annotation}, which is not supported by Claude. Must return a string.")
+    if sig.return_annotation is not ToolResult:
+        logger.error(f"Tool `{name}` has a return type of {sig.return_annotation}, which is not supported by Claude. Must return ToolResult.")
         return None
 
     doc = docstring_parser.parse(inspect.getdoc(func) or "")
@@ -155,30 +160,24 @@ def get_tool_definition(name: str, func: Callable[[object], object]) -> JSON:
     }
 
 
-def get_tool_definitions() -> list[JSON]:
+def get_python_tools() -> tuple[AvailableTools, list[JSON]]:
     """
     Generate tool definitions for Claude based on functions in tools.py.
     """
     available_tools = get_available_tools()
-    tool_definitions: list[JSON] = [get_tool_definition(name, func) for name, func in available_tools.items()]
+    tool_definitions: list[JSON] = [extract_tool_definition_from_signature(name, func) for name, func in available_tools.items()]
     tool_definitions = [td for td in tool_definitions if td is not None]
 
-    logger.debug(f"Using tool definitions: {json.dumps(tool_definitions, indent=2)}")
-
-    return tool_definitions
+    return available_tools, tool_definitions
 
 
-tool_definitions = get_tool_definitions()
-
-
-async def use_tools(messages: History) -> dict[str, JSON]:
+async def use_tools(available_tools: AvailableTools, messages: History) -> dict[str, JSON]:
     """
     Use the tools specified in the messages to perform actions.
     This function is called when the model indicates that it wants to use a tool.
     """
-    available_tools = get_available_tools()
     tool_results: list[dict[str, JSON]] = []
-    tool_tasks: list[asyncio.Task[JSON] | None] = []
+    tool_tasks: list[asyncio.Task[ToolResult] | None] = []
 
     # Find the last assistant message with tool use
     last_message = messages[-1] if messages else None
@@ -194,7 +193,8 @@ async def use_tools(messages: History) -> dict[str, JSON]:
 
             if tool_name and tool_name in available_tools:
                 # Call the tool function with the provided input
-                tool_use_task: asyncio.Task[JSON] = asyncio.create_task(available_tools[tool_name](**tool_input))
+                tool_fun = available_tools[tool_name]
+                tool_use_task = asyncio.create_task(tool_fun(**tool_input))
                 tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id})
                 tool_tasks.append(tool_use_task)
             else:
@@ -207,7 +207,16 @@ async def use_tools(messages: History) -> dict[str, JSON]:
             continue
 
         try:
-            tool_result["content"] = str(await task)
+            result = await task
+            content: list[dict[str, JSON]] = []
+            for r in result:
+                if isinstance(r, ToolContentText):
+                    content.append({"type": "text", "text": r.text})
+                # elif isinstance(r, ToolContentBase64Image):
+                else:
+                    content.append({"type": "image", "source": {"type": "base64", "data": r.data, "media_type": r.type}})
+
+            tool_result["content"] = content
         except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
             if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
                 tool_result["content"] = "Tool execution was cancelled."

@@ -23,6 +23,7 @@
           humanize
           keyring
           loguru
+          mcp
           oauthlib
           partial-json-parser
           prompt_toolkit

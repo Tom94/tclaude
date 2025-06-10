@@ -175,7 +175,7 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
         title = f"Tool `{name}`"
     elif kind == "mcp_tool_use":
         server_name = get_or(tool_use, "server_name", "<unknown>")
-        title = f"MCP tool `{name}` via {server_name}"
+        title = f"Tool `{name}` via `{server_name}`"
     elif kind == "server_tool_use":
         title = f"Server tool `{name}`"
     else:

@@ -91,13 +91,17 @@ Make sure to [document](https://docs.anthropic.com/en/docs/agents-and-tools/tool
 
 ### MCP server support
 
-To connect **tclaude** to remote [MCP servers](https://mcpservers.org/), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authorization tokens:
+To connect **tclaude** to [remote MCP servers](https://mcpservers.org/remote-mcp-servers), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authentication info:
 
 ```toml
 [[mcp.remote_servers]]
 name = "example-mcp"
 url = "https://example-server.modelcontextprotocol.io/sse"
-authorization_token = "<your-authorization-token>"
+
+authentication = "oauth2" # opens a browser window to authenticate on first use
+# or: authentication = "none"
+# or: authentication = "token", authorization_token = "<your-authorization-token>"
+
 # Optional: restrict the tools that can be used with this MCP server
 # tool_configuration.enabled = true
 # tool_configuration.allowed_tools = [
@@ -106,7 +110,7 @@ authorization_token = "<your-authorization-token>"
 # ]
 
 [[mcp.remote_servers]]
-name = "another-mcp-server"
+name = "another-remote-mcp-server"
 url = "..."
 ```
 

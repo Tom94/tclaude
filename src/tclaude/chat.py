@@ -28,9 +28,10 @@ from prompt_toolkit.output import create_output
 
 from . import common
 from .common import History
-from .config import TClaudeArgs, load_system_prompt, get_mcp_config
+from .config import TClaudeArgs, load_system_prompt
 from .json import JSON
 from .live_print import live_print
+from .mcp import get_mcp_config
 from .print import history_to_string
 from .prompt import (
     Response,
@@ -83,8 +84,6 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
 
-    mcp = get_mcp_config(config)
-
     system_prompt = load_system_prompt(args.role) if args.role else None
     session = ChatSession(
         history=history,
@@ -99,6 +98,7 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
             if session.uploaded_files:
                 _ = tg.create_task(session.verify_file_uploads(client_session))
             file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
+            mcp = await get_mcp_config(client_session, config)
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
         user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
@@ -113,7 +113,7 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
                 max_tokens=args.max_tokens,
                 enable_web_search=not args.no_web_search,  # Web search is enabled by default
                 enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                mcp_remote_servers=mcp.remote_servers if mcp else None,
+                mcp_remote_servers=await mcp.get_remote_server_descs(client_session),
                 system_prompt=system_prompt,
                 enable_thinking=args.thinking,
                 thinking_budget=args.thinking_budget,
@@ -135,7 +135,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: d
     Main function to get user input, and print Anthropic's response.
     """
 
-    mcp = get_mcp_config(config)
+    mcp = await get_mcp_config(client, config)
 
     system_prompt = load_system_prompt(args.role) if args.role else None
     session = ChatSession(
@@ -267,7 +267,7 @@ async def async_chat(client: aiohttp.ClientSession, args: TClaudeArgs, config: d
                         max_tokens=args.max_tokens,
                         enable_web_search=not args.no_web_search,  # Web search is enabled by default
                         enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
-                        mcp_remote_servers=mcp.remote_servers if mcp else None,
+                        mcp_remote_servers=await mcp.get_remote_server_descs(client),
                         system_prompt=session.system_prompt,
                         enable_thinking=args.thinking,
                         thinking_budget=args.thinking_budget,

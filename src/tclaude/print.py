@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
+from functools import partial
 import json
 import os
 from dataclasses import dataclass
@@ -102,28 +103,24 @@ def gather_tool_results(messages: History) -> dict[str, JSON]:
 
 
 def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: bool, wrap_width: int):
-    tool_name = get_or(tool_use, "name", "<unknown>")
+    _ = io.write("\n")
+    match tool_result:
+        # Server tools (annoyingly) have special structures. First handle those.
 
-    if get(tool_result, "is_error", str):
-        error_message = get_or(tool_result, "error", "<unknown>")
-        write_error_block("Error", error_message, io, pretty, wrap_width)
-        return
+        # Server tool errors:
+        case {"type": "web_search_tool_result", "content": {"type": "web_search_tool_result_error", "error_code": str(error_code)}}:
+            write_error_block("Error", error_code, io, pretty, wrap_width)
+        case {"type": "code_execution_tool_result", "content": {"type": "code_execution_tool_result_error", "error_code": str(error_code)}}:
+            write_error_block("Error", error_code, io, pretty, wrap_width)
 
-    if tool_name == "fetch_url":
-        content = get_or(tool_result, "content", "")
-        num_lines = content.count("\n") + 1
-        result_text = f"Fetched HTML and converted it to {num_lines} lines of markdown text."
-    elif tool_name == "web_search":
-        results = get_or_default(tool_result, "content", list[JSON])
-        result_text = f"Found {len(results)} references. See citations below."
-    elif tool_name == "code_execution":
-        output = get_or_default(tool_result, "content", dict[str, JSON])
-
-        result_io = StringIO()
-        if output:
-            return_code = get_or(output, "return_code", 0)
-            stdout = get_or(output, "stdout", "")
-            stderr = get_or(output, "stderr", "")
+        # Server tool results:
+        case {"type": "web_search_tool_result", "content": list(results)}:
+            write_result_block("Result", f"Found {len(results)} references. See citations below.", io, pretty, wrap_width)
+        case {"type": "code_execution_tool_result", "content": {"type": "code_execution_result", **content}}:
+            result_io = StringIO()
+            return_code = get_or(content, "return_code", 0)
+            stdout = get_or(content, "stdout", "")
+            stderr = get_or(content, "stderr", "")
 
             _ = result_io.write(f"Return code: {return_code}")
             if stdout:
@@ -131,29 +128,41 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
             if stderr:
                 _ = result_io.write(f"\n\nstderr:\n{stderr.strip()}")
 
-        result_text = result_io.getvalue()
-    else:
-        content = get(tool_result, "content", list[JSON])
-        if content is None:
-            content = get(tool_result, "text", str)
+            write_result_block("Result", result_io.getvalue(), io, pretty, wrap_width)
+
+        # Regular tool results
+        case _:
+            is_error = get_or(tool_result, "is_error", False)
+            if is_error:
+                write_fun = partial(write_error_block, "Error")
+            else:
+                write_fun = partial(write_result_block, "Result")
+
+            # Special case for fetching html content, which would take up a lot of space if printed.
+            if not is_error and get_or(tool_use, "name", "<unknown>") == "fetch_url":
+                content = get_or_default(tool_result, "content", list[dict[str, str]])
+                num_lines = content[0]["text"].count("\n") + 1
+                write_fun(f"Fetched HTML and converted it to {num_lines} lines of markdown text.", io, pretty, wrap_width)
+                return
+
+            content = get(tool_result, "content", list[JSON])
             if content is None:
-                content = "<unknown>"
-            content = [{"type": "text", "text": content}]
+                content = get(tool_result, "text", str)
+                if content is None:
+                    content = "<unknown>"
+                content = [{"type": "text", "text": content}]
 
-        result_io = StringIO()
-        for content_block in content:
-            if result_io.tell() > 0:
-                _ = result_io.write("\n\n")
-            match content_block:
-                case {"type": "text", "text": str(text)}:
-                    _ = result_io.write(text)
-                case _:
-                    _ = result_io.write(json.dumps(content_block, indent=2, sort_keys=True))
+            result_io = StringIO()
+            for content_block in content:
+                if result_io.tell() > 0:
+                    _ = result_io.write("\n\n")
+                match content_block:
+                    case {"type": "text", "text": str(text)}:
+                        _ = result_io.write(text)
+                    case _:
+                        _ = result_io.write(json.dumps(content_block, indent=2, sort_keys=True))
 
-        result_text = result_io.getvalue()
-
-    _ = io.write("\n")
-    write_result_block("Result", result_text, io, pretty, wrap_width)
+            write_fun(result_io.getvalue(), io, pretty, wrap_width)
 
 
 def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, pretty: bool, wrap_width: int):

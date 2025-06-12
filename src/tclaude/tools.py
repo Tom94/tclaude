@@ -20,8 +20,6 @@ directly callable by Claude.
 """
 
 
-
-
 class ToolContentText:
     def __init__(self, text: str):
         self.text: str = text
@@ -33,7 +31,10 @@ class ToolContentBase64Image:
         self.type: str = type
 
 
-type ToolResult = list[ToolContentText | ToolContentBase64Image]
+class ToolResult:
+    def __init__(self, content: list[ToolContentText | ToolContentBase64Image], is_error: bool):
+        self.content: list[ToolContentText | ToolContentBase64Image] = content
+        self.is_error: bool = is_error
 
 
 async def fetch_url(url: str) -> ToolResult:
@@ -56,9 +57,10 @@ async def fetch_url(url: str) -> ToolResult:
             response.raise_for_status()
 
             soup = BeautifulSoup(await response.text(), "html.parser")
+
             # Remove script and style elements
-            for script_or_style in soup(["script", "style", "meta", "link", "noscript", "iframe", "embed", "object"]):
-                script_or_style.decompose()
+            for script_or_style in soup(["script", "style", "meta", "link", "noscript", "iframe", "embed", "object"]):  # pyright: ignore[reportAny]
+                script_or_style.decompose()  # pyright: ignore[reportAny]
 
             # Get the text content
             cleaned_html = str(soup)
@@ -74,4 +76,4 @@ async def fetch_url(url: str) -> ToolResult:
             h.mark_code = True
 
             markdown = h.handle(cleaned_html)
-            return [ToolContentText(markdown)]
+            return ToolResult([ToolContentText(markdown)], is_error=False)

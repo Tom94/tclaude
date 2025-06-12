@@ -132,7 +132,7 @@ class McpConnection:
             TextResourceContents,
         )
 
-        content: ToolResult = []
+        content: list[ToolContentText | ToolContentBase64Image] = []
 
         result = await self._conn.call_tool(tool_name, kwargs)
         for c in result.content:
@@ -148,10 +148,7 @@ class McpConnection:
                         case BlobResourceContents():
                             logger.warning(f"Ignoring embedded resource of type '{c.type}' in tool '{tool_name}'")
 
-        if result.isError:
-            raise RuntimeError(f"Error calling tool '{tool_name}'")
-
-        return content
+        return ToolResult(content, is_error=result.isError)
 
 
 class McpServerConfig:
@@ -312,7 +309,7 @@ class McpServerConfigs:
 
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         await self._exit_stack.aclose()
         self._conns.clear()
         logger.debug("Closed all MCP server connections.")

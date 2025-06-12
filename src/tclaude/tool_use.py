@@ -29,7 +29,7 @@ from loguru import logger
 
 from .common import History
 from .json import JSON, get, get_or, get_or_default
-from .tools import ToolContentText, ToolResult
+from .tools import ToolContentBase64Image, ToolContentText, ToolResult
 
 type AvailableTools = dict[str, Callable[..., Coroutine[None, None, ToolResult]]]
 
@@ -209,14 +209,14 @@ async def use_tools(available_tools: AvailableTools, messages: History) -> dict[
         try:
             result = await task
             content: list[dict[str, JSON]] = []
-            for r in result:
-                if isinstance(r, ToolContentText):
-                    content.append({"type": "text", "text": r.text})
-                # elif isinstance(r, ToolContentBase64Image):
-                else:
-                    content.append({"type": "image", "source": {"type": "base64", "data": r.data, "media_type": r.type}})
+            for c in result.content:
+                if isinstance(c, ToolContentText):
+                    content.append({"type": "text", "text": c.text})
+                elif isinstance(c, ToolContentBase64Image):  # pyright: ignore[reportUnnecessaryIsInstance]
+                    content.append({"type": "image", "source": {"type": "base64", "data": c.data, "media_type": c.type}})
 
             tool_result["content"] = content
+            tool_result["is_error"] = result.is_error
         except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
             if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
                 tool_result["content"] = "Tool execution was cancelled."

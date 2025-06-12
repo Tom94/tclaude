@@ -279,8 +279,6 @@ class OAuth2Client:
 
             try:
                 callback_result = await callback_event
-            except asyncio.CancelledError:
-                raise ValueError("Authentication cancelled by user")
             except asyncio.TimeoutError:
                 raise ValueError("Authentication timeout")
         finally:

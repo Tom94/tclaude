@@ -17,6 +17,7 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import sys
 from typing import Callable, TypeAlias, cast
 
 from loguru import logger
@@ -245,13 +246,24 @@ def syntax_highlight(string: str, language: str) -> str:
 
     command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
 
-    # Use bat to pretty print the string
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    # Use bat to pretty print the string. Spawn in new process group to avoid issues with Ctrl-C handling.
+    if sys.platform == "win32":
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    else:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            preexec_fn=os.setsid
+        )
+
     output, error = process.communicate(input=string.encode("utf-8"))
 
     if process.returncode != 0:

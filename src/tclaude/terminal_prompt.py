@@ -85,14 +85,11 @@ async def terminal_prompt(
     update_prefix()
 
     async def animate_prompts():
-        try:
-            while True:
-                await asyncio.sleep(1 / SPINNER_FPS)
-                update_prefix()
-                prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
-                prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
-        except asyncio.CancelledError:
-            pass
+        while True:
+            await asyncio.sleep(1 / SPINNER_FPS)
+            update_prefix()
+            prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
+            prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
 
     animate_task = asyncio.create_task(animate_prompts())
     try:
@@ -113,7 +110,10 @@ async def terminal_prompt(
             )
     finally:
         _ = animate_task.cancel()
-        await animate_task
+        try:
+            await animate_task
+        except asyncio.CancelledError:
+            pass
 
     user_input = user_input.strip()
     return user_input

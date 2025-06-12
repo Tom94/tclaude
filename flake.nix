@@ -70,13 +70,14 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             python
-            pythonPackages.pip
-            pythonPackages.setuptools
-            pythonPackages.wheel
-            pythonPackages.pytest
             pythonPackages.black
+            pythonPackages.build
             pythonPackages.flake8
             pythonPackages.mypy
+            pythonPackages.pip
+            pythonPackages.pytest
+            pythonPackages.setuptools
+            pythonPackages.wheel
           ] ++ pythonDeps;
         };
       });

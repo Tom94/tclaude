@@ -101,8 +101,7 @@ Two kinds of servers are supported:
 
 2. Local servers (running on your machine or in an internal network)
     - **tclaude** will connect to the MCP server via your machine and forward the tools to Claude.
-    - Local servers are useful for tools that require access to local resources (e.g. files on your machine or private data).
-    - Authentication is not supported for local servers. **tclaude** assumes that, if you have access to a local server, you are authorized to use it.
+    - Local servers are useful for tools that require access to local resources (e.g. files on your machine).
     - Two protocols are supported: STDIN (**tclaude** starts the server and pipes the input to it) and HTTPS (**tclaude** connects to the server via a URL).
 
 Example MCP configuration for `~/.configs/tclaude/tclaude.toml`:
@@ -110,7 +109,7 @@ Example MCP configuration for `~/.configs/tclaude/tclaude.toml`:
 ```toml
 [[mcp.local_servers]]
 name = "filesystem"
-command = "npx" # launches the MCP server via a connects via STDIN
+command = "npx" # command and arguments to start the MCP server
 args = [
     "-y",
     "@modelcontextprotocol/server-filesystem",

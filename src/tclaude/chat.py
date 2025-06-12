@@ -335,7 +335,7 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
             if is_user_turn and session.name is None and not session.is_autonaming:
                 session.start_autoname_task(client)
 
-    print()
+        print()
 
     # If we received at least one response
     if response is not None:

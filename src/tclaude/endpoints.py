@@ -55,12 +55,20 @@ def get_messages_endpoint_anthropic(model: str) -> tuple[str, dict[str, str], di
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY environment variable must be set")
 
+    beta_features = [
+        "interleaved-thinking-2025-05-14",
+        "code-execution-2025-05-22",
+        "files-api-2025-04-14",
+        "mcp-client-2025-04-04",
+        "fine-grained-tool-streaming-2025-05-14"
+    ]
+
     # Prepare headers
     headers = {
         "Content-Type": "application/json",
         "x-api-key": ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "interleaved-thinking-2025-05-14,code-execution-2025-05-22,files-api-2025-04-14,mcp-client-2025-04-04",
+        "anthropic-beta": ",".join(beta_features),
     }
 
     url = "https://api.anthropic.com/v1/messages"

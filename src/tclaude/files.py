@@ -19,7 +19,8 @@ import asyncio
 import json
 import mimetypes
 import os
-from typing import Mapping, cast
+from collections.abc import Mapping
+from typing import cast
 
 import aiofiles
 import aiohttp
@@ -75,7 +76,7 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
     url, headers = endpoints.get_files_endpoint_anthropic()
 
     try:
-        async with aiofiles.open(file_path, "rb") as file:
+        async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
             file_data = await file.read()
 
         mime_type, content_encoding = mimetypes.guess_file_type(file_path)
@@ -115,6 +116,7 @@ async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> JSO
 
     return data
 
+
 async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> JSON | None:
     """
     Get file metadata, returning None if the file does not exist.
@@ -145,7 +147,7 @@ async def download_file(session: aiohttp.ClientSession, file_id: str, file_path:
         async with session.get(url, headers=headers) as response:
             response.raise_for_status()
 
-            async with aiofiles.open(file_path, "wb") as file:
+            async with aiofiles.open(file_path, "wb") as file:  # pyright: ignore[reportUnknownMemberType]
                 async for data, _ in response.content.iter_chunks():
                     _ = await file.write(data)
     except aiohttp.ClientResponseError as e:

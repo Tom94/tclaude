@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import threading
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -27,7 +28,6 @@ from typing import TextIO, override
 from urllib.parse import urlparse
 
 import aiohttp
-import logging
 
 from .json import JSON, get, get_or, get_or_default
 from .tool_use import AvailableTools

@@ -16,11 +16,10 @@
 
 
 import argparse
+import logging
 import os
 import sys
 import tomllib
-
-import logging
 
 from .json import JSON
 

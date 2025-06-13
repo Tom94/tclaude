@@ -15,16 +15,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
-from functools import partial
+import asyncio
 import json
+import logging
 import os
 from dataclasses import dataclass
+from functools import partial
 from io import StringIO
 from itertools import groupby
 from typing import cast
 
 from humanize import naturalsize
-import logging
 
 from . import common, config, logging_config
 from .common import History, escape, wrap_style
@@ -167,7 +168,7 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
             write_fun(result_io.getvalue(), io, pretty, wrap_width)
 
 
-def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, pretty: bool, wrap_width: int):
+async def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, pretty: bool, wrap_width: int):
     def check_tool_result(title: str, text: str, tool_id: str) -> tuple[str, str, JSON]:
         tool_result = tool_results.get(tool_id)
         if tool_result is None:
@@ -212,7 +213,7 @@ def write_tool_use(tool_use: JSON, tool_results: dict[str, JSON], io: StringIO, 
     text = common.word_wrap(text, wrap_width - 2)
 
     if pretty and language:
-        text = common.syntax_highlight(text, language)
+        text = await common.syntax_highlight(text, language)
 
     title, text, tool_result = check_tool_result(title, text, get_or(tool_use, "id", ""))
     write_call_block(title, text, io, pretty, wrap_width=0)  # We already wrapped prior to syntax highlighting
@@ -280,7 +281,7 @@ def write_user_message(
         _ = io.write("\n\n")
 
 
-def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int, text_only: bool):
+async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: StringIO, pretty: bool, wrap_width: int, text_only: bool):
     @dataclass(frozen=True)
     class Reference:
         id: int
@@ -352,12 +353,12 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
 
             text = common.word_wrap(rstrip(text_io).getvalue(), wrap_width)
             if pretty:
-                text = common.syntax_highlight(text, "md")
+                text = await common.syntax_highlight(text, "md")
 
             _ = io.write(text)
             i -= 1  # Adjust for the outer loop increment
         elif block_type == "tool_use" or block_type == "server_tool_use" or block_type == "mcp_tool_use":
-            write_tool_use(content_block, tool_results, io, pretty, wrap_width)
+            await write_tool_use(content_block, tool_results, io, pretty, wrap_width)
         elif block_type == "redacted_thinking":
             encrypted_thinking = get_or(content_block, "data", "")
             write_call_block("Redacted thinking", f"{len(encrypted_thinking)} bytes of encrypted thinking data.", io, pretty, wrap_width)
@@ -383,7 +384,7 @@ def write_assistant_message(tool_results: dict[str, JSON], message: JSON, io: St
             _ = io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")
 
 
-def history_to_string(
+async def history_to_string(
     history: History,
     pretty: bool,
     wrap_width: int = 0,
@@ -401,7 +402,7 @@ def history_to_string(
         elif role == "user":
             write_user_message(message, io, pretty, wrap_width=wrap_width, skip_user_text=skip_user_text, uploaded_files=uploaded_files, text_only=text_only)
         elif role == "assistant":
-            write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width, text_only=text_only)
+            await write_assistant_message(tool_results, message, io, pretty, wrap_width=wrap_width, text_only=text_only)
 
     return rstrip(io).getvalue()
 
@@ -429,7 +430,7 @@ class PrintArgs(argparse.Namespace):
         self.verbose: bool = False
 
 
-def main():
+async def async_main():
     """
     Main function to parse arguments, load a JSON file containing conversation history, and print it.
     """
@@ -451,12 +452,16 @@ def main():
 
         wrap_width = os.get_terminal_size().columns if os.isatty(1) else 0
 
-        result = history_to_string(history, pretty=args.pretty, wrap_width=wrap_width)
+        result: str = await history_to_string(history, pretty=args.pretty, wrap_width=wrap_width)
         print(result, end="", flush=True)
     except json.JSONDecodeError:
         logger.exception(f"Could not parse JSON file {args.session}")
     except FileNotFoundError:
         logger.exception(f"Could not find session file {args.session}")
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

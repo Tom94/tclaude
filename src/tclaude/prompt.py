@@ -18,13 +18,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from io import StringIO
 from typing import Callable, cast
 
 import aiohttp
-import logging
 from partial_json_parser import loads as ploads  # pyright: ignore
 
 from . import common, endpoints, files, tool_use

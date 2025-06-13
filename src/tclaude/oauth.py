@@ -20,6 +20,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -34,7 +35,6 @@ import aiohttp
 import keyring
 import keyring.errors
 from aiohttp import web
-import logging
 from multidict import MultiMapping
 from oauthlib.oauth2 import WebApplicationClient
 

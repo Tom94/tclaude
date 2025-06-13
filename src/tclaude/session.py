@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import logging
 import os
 
 import aiofiles.os
 import aiohttp
-import logging
 
 from . import common, files, prompt
 from .common import History
@@ -141,7 +141,7 @@ class ChatSession:
             )
 
             self.total_tokens += response.tokens
-            session_name = history_to_string(response.messages, pretty=False)
+            session_name = await history_to_string(response.messages, pretty=False)
         except (aiohttp.ClientError, asyncio.CancelledError) as e:
             if isinstance(e, asyncio.CancelledError):
                 logger.error("Auto-naming cancelled. Using timestamp.")

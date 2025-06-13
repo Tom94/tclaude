@@ -20,12 +20,12 @@
 import asyncio
 import importlib
 import inspect
+import logging
 from collections.abc import Coroutine
 from types import UnionType
 from typing import Any, Callable, Literal, get_args, get_origin
 
 import docstring_parser
-import logging
 
 from .common import History
 from .json import JSON, get, get_or, get_or_default

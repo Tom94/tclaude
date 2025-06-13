@@ -14,13 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import logging
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import sys
 from typing import Callable, TypeAlias, cast
-
-import logging
 
 from .json import JSON, get, get_or_default, of_type_or_none
 
@@ -236,7 +235,7 @@ def make_check_bat_available() -> Callable[[], bool]:
 check_bat_available = make_check_bat_available()
 
 
-def syntax_highlight(string: str, language: str) -> str:
+async def syntax_highlight(string: str, language: str) -> str:
     """
     Turn string pretty by piping it through bat
     """
@@ -244,23 +243,32 @@ def syntax_highlight(string: str, language: str) -> str:
     if not check_bat_available():
         return string
 
+    import asyncio
     import subprocess
 
     command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
 
     # Use bat to pretty print the string. Spawn in new process group to avoid issues with Ctrl-C handling.
     if sys.platform == "win32":
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        process = await asyncio.create_subprocess_exec(
+            command[0],
+            *command[1:],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
     else:
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+        process = await asyncio.create_subprocess_exec(
+            command[0],
+            *command[1:],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            preexec_fn=os.setsid,
+        )
 
-    output, error = process.communicate(input=string.encode("utf-8"))
+    output, error = await process.communicate(input=string.encode("utf-8"))
 
     if process.returncode != 0:
         raise Exception(f"Error: {error.decode('utf-8')}")

@@ -15,11 +15,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
+import inspect
 import os
 import sys
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
-from typing import Callable, TextIO
+from typing import Callable, TextIO, cast
 
 from .spinner import SPINNER_FPS
 
@@ -34,12 +36,12 @@ def nth_rfind(string: str, char: str, n: int) -> int:
 
 
 @asynccontextmanager
-async def live_print(get_live_text: Callable[[], str], transient: bool = True):
+async def live_print(get_live_text: Callable[[], str] | Callable[[], Awaitable[str]], transient: bool = True):
     original_stdout: TextIO = sys.stdout
     with StringIO() as stdout, redirect_stdout(stdout), redirect_stderr(stdout):
         num_newlines_printed = 0
 
-        def clear_and_print(final: bool):
+        async def clear_and_print(final: bool):
             nonlocal num_newlines_printed
 
             to_print = StringIO()
@@ -56,7 +58,11 @@ async def live_print(get_live_text: Callable[[], str], transient: bool = True):
 
             term_height = os.get_terminal_size().lines
 
-            text = get_live_text()
+            if inspect.iscoroutinefunction(get_live_text):
+                text = cast(str, await get_live_text())
+            else:
+                text = cast(str, get_live_text())
+
             if not stdout.tell() == 0:
                 text = f"{text}\n\n{stdout.getvalue().rstrip()}"
 
@@ -77,7 +83,7 @@ async def live_print(get_live_text: Callable[[], str], transient: bool = True):
             # Initial wait for 1ms in case the task is already cancelled and nothing has to be printed.
             await asyncio.sleep(1.0 / 1000.0)
             while True:
-                clear_and_print(final=False)
+                await clear_and_print(final=False)
                 await asyncio.sleep(1.0 / SPINNER_FPS)
 
         task = asyncio.create_task(live_print_task())
@@ -90,4 +96,4 @@ async def live_print(get_live_text: Callable[[], str], transient: bool = True):
             except asyncio.CancelledError:
                 pass
             finally:
-                clear_and_print(final=True)
+                await clear_and_print(final=True)

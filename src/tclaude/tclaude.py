@@ -14,14 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-
+import asyncio
+import logging
 import os
 import sys
 
-import logging
-
 from . import common, logging_config
-from .config import parse_tclaude_args, load_config
+from .config import load_config, parse_tclaude_args
 from .print import history_to_string, print_decoy_prompt
 
 logger = logging.getLogger(__package__)
@@ -40,7 +39,7 @@ def read_user_input(input: list[str]) -> str:
     return user_input
 
 
-def main():
+async def async_main():
     if "ANTHROPIC_API_KEY" not in os.environ:
         print(
             "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys",
@@ -66,11 +65,11 @@ def main():
 
         from . import chat
 
-        chat.single_prompt(args, config, history, user_input, print_text_only=True)
+        await chat.single_prompt(args, config, history, user_input, print_text_only=True)
         return
 
     if history:
-        print(history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
+        print(await history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
 
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
@@ -79,7 +78,11 @@ def main():
 
     from . import chat
 
-    chat.chat(args, config, history, user_input)
+    await chat.chat(args, config, history, user_input)
+
+
+def main():
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

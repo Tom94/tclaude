@@ -16,13 +16,13 @@
 
 import asyncio
 import json
+import logging
 import os
 import signal
 from contextlib import AsyncExitStack
 from itertools import chain
 
 import aiohttp
-import logging
 from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
@@ -83,7 +83,7 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
     return results
 
 
-async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
+async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
@@ -137,14 +137,10 @@ async def async_single_prompt(args: TClaudeArgs, config: dict[str, JSON], histor
             if not response.call_again:
                 break
 
-    print(history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
+    print(await history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
 
 
-def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
-    asyncio.run(async_single_prompt(args, config, history, user_input, print_text_only))
-
-
-async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
+async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
     """
     Main function to get user input, and print Anthropic's response.
     """
@@ -176,14 +172,14 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
         if user_input:
             prompt_session.history.append_string(user_input)
 
-        def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
-            return history_to_string(
+        async def pretty_history_to_string(messages: History, skip_user_text: bool) -> str:
+            return await history_to_string(
                 messages, pretty=True, wrap_width=os.get_terminal_size().columns, skip_user_text=skip_user_text, uploaded_files=session.uploaded_files
             )
 
         # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-        def history_or_spinner(messages: History):
-            current_message = pretty_history_to_string(messages, skip_user_text=True)
+        async def history_or_spinner(messages: History):
+            current_message = await pretty_history_to_string(messages, skip_user_text=True)
             return current_message if current_message else f"{spinner()} "
 
         def lprompt(prefix: str) -> str:
@@ -272,7 +268,7 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
                 session.history.append({"role": "user", "content": user_content})
 
                 # This includes things like file uploads, but *not* the user input text itself, which is already printed in the prompt.
-                user_history_string = pretty_history_to_string(session.history[-1:], skip_user_text=True)
+                user_history_string = await pretty_history_to_string(session.history[-1:], skip_user_text=True)
                 if user_history_string:
                     print(user_history_string, end="\n\n")
 
@@ -286,8 +282,11 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
                 logger.info(f"write_cache={write_cache}")
 
             partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
+            async def partial_history_or_spinner() -> str:
+                return await history_or_spinner(partial.messages)
+
             try:
-                async with live_print(lambda: history_or_spinner(partial.messages), transient=False):
+                async with live_print(partial_history_or_spinner, transient=False):
                     stream_task = asyncio.create_task(
                         stream_response(
                             session=client,
@@ -361,7 +360,3 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
     if args.verbose:
         session.total_tokens.print_tokens()
         session.total_tokens.print_cost(args.model)
-
-
-def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
-    asyncio.run(async_chat(args, config, history, user_input))

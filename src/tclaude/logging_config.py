@@ -19,12 +19,11 @@ from __future__ import annotations
 import atexit
 import datetime
 import json
-import os
-import sys
-
 import logging
 import logging.config
 import logging.handlers
+import os
+import sys
 from typing import override
 
 from .common import (
@@ -35,7 +34,6 @@ from .common import (
     ANSI_RESET,
     get_state_dir,
 )
-
 
 logger = logging.getLogger(__package__)
 did_print_since_prompt = False

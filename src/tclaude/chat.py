@@ -324,8 +324,10 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 print("\n")
                 if isinstance(e, asyncio.CancelledError):
                     logger.error("Response cancelled.\n")
+                elif isinstance(e, aiohttp.ClientResponseError):
+                    logger.exception(f"Error {e.status}: {e.message}\n")
                 else:
-                    logger.exception(f"Unexpected error: {e}. Please try again.\n")
+                    logger.exception(f"Unexpected error: {e}\n")
 
                 continue
             finally:

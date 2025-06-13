@@ -43,7 +43,19 @@ BLOCKED_DOMAINS = None  # Example: ["untrustedsource.com"]
 
 async def stream_events(session: aiohttp.ClientSession, url: str, headers: dict[str, str], params: JSON) -> AsyncGenerator[JSON]:
     async with session.post(url, headers=headers, json=params) as response:
-        response.raise_for_status()
+        # Anthropic API errors are returned as JSON objects with a specific structure. Translate into human-readable errors.
+        if response.status >= 300 or response.status < 200:
+            text = await response.text()
+            try:
+                json_data = cast(JSON, json.loads(text))
+                match json_data:
+                    case {"type": "error", "error": {"type": str(type), "message": str(message)}}:
+                        raise aiohttp.ClientResponseError(response.request_info, response.history, status=response.status, message=f"{type}: {message}")
+                    case _:
+                        raise aiohttp.ClientResponseError(response.request_info, response.history, status=response.status, message=text)
+            except json.JSONDecodeError:
+                raise aiohttp.ClientResponseError(response.request_info, response.history, status=response.status, message=text)
+
         async for line in response.content:
             if line.startswith(b"data: "):
                 try:

@@ -25,11 +25,13 @@ from types import UnionType
 from typing import Any, Callable, Literal, get_args, get_origin
 
 import docstring_parser
-from loguru import logger
+import logging
 
 from .common import History
 from .json import JSON, get, get_or, get_or_default
 from .tools import ToolContentBase64Image, ToolContentText, ToolResult
+
+logger = logging.getLogger(__package__)
 
 type AvailableTools = dict[str, Callable[..., Coroutine[None, None, ToolResult]]]
 

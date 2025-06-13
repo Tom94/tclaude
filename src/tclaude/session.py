@@ -22,13 +22,15 @@ import os
 
 import aiofiles.os
 import aiohttp
-from loguru import logger
+import logging
 
 from . import common, files, prompt
 from .common import History
 from .json import JSON, get, get_or_default
 from .print import history_to_string
 from .token_counter import TokenCounter
+
+logger = logging.getLogger(__package__)
 
 
 class ChatSession:
@@ -95,7 +97,7 @@ class ChatSession:
                 case {"id": str(file_id)}:
                     self.uploaded_files[file_id] = metadata
                 case BaseException() as e:
-                    logger.opt(exception=e).error(f"Failed to verify file upload: {e}")
+                    logger.error(f"Failed to verify file upload: {e}")
                 case _:
                     logger.warning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
 
@@ -144,7 +146,7 @@ class ChatSession:
             if isinstance(e, asyncio.CancelledError):
                 logger.error("Auto-naming cancelled. Using timestamp.")
             else:
-                logger.opt(exception=e).error(f"Error auto-naming session: {e}.")
+                logger.exception(f"Error auto-naming session: {e}.")
             session_name = datetime.datetime.now().strftime("%H-%M-%S")
 
         session_name = session_name.strip().lower()
@@ -153,7 +155,7 @@ class ChatSession:
 
         date = datetime.datetime.now().strftime("%Y-%m-%d")
         self.name = f"{date}-{session_name}"
-        logger.success(f"Session named {self.name}")
+        logger.info(f"[✓] Session named {self.name}")
 
     @property
     def is_autonaming(self) -> bool:

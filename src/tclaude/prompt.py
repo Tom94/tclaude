@@ -24,7 +24,7 @@ from io import StringIO
 from typing import Callable, cast
 
 import aiohttp
-from loguru import logger
+import logging
 from partial_json_parser import loads as ploads  # pyright: ignore
 
 from . import common, endpoints, files, tool_use
@@ -32,6 +32,8 @@ from .common import History
 from .json import JSON, get, get_or, get_or_default
 from .token_counter import TokenCounter
 from .tool_use import AvailableTools
+
+logger = logging.getLogger(__package__)
 
 # Web search tool configuration
 MAX_SEARCH_USES = 5

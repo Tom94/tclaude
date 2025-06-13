@@ -22,7 +22,7 @@ from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from . import common, logging
+from . import common, logging_config
 from .spinner import SPINNER_FPS
 
 
@@ -78,9 +78,9 @@ async def terminal_prompt(
 
     def update_prefix():
         nonlocal prefix
-        if logging.did_print_since_prompt:
+        if logging_config.did_print_since_prompt:
             prefix = "\n"
-            logging.did_print_since_prompt = False
+            logging_config.did_print_since_prompt = False
 
     update_prefix()
 

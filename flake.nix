@@ -22,7 +22,6 @@
           html2text
           humanize
           keyring
-          loguru
           mcp
           oauthlib
           partial-json-parser

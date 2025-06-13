@@ -19,11 +19,12 @@ import argparse
 import os
 import sys
 import tomllib
-from importlib import resources
 
-from loguru import logger
+import logging
 
 from .json import JSON
+
+logger = logging.getLogger(__package__)
 
 
 def get_config_dir() -> str:
@@ -57,7 +58,7 @@ def load_system_prompt(path: str) -> str | None:
         with open(path, "r") as f:
             system_prompt = f.read().strip()
     except FileNotFoundError:
-        logger.error(f"System prompt file {path} not found.")
+        logger.exception(f"System prompt file {path} not found.")
     return system_prompt
 
 
@@ -144,6 +145,9 @@ def load_config(filename: str | None) -> dict[str, JSON]:
         filename = os.path.join(get_config_dir(), filename)
         if not os.path.isfile(filename):
             logger.debug(f"Configuration file {filename} not found. Using default configuration.")
+
+            from importlib import resources
+
             resources_path = resources.files(__package__)
             filename = str(resources_path.joinpath("default-config", "tclaude.toml"))
 
@@ -154,4 +158,3 @@ def load_config(filename: str | None) -> dict[str, JSON]:
     except Exception as e:
         logger.error(f"Failed to load configuration from {filename}: {e}")
         return {}
-

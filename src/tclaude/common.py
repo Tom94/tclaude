@@ -20,9 +20,11 @@ from datetime import datetime, timedelta, timezone
 import sys
 from typing import Callable, TypeAlias, cast
 
-from loguru import logger
+import logging
 
 from .json import JSON, get, get_or_default, of_type_or_none
+
+logger = logging.getLogger(__package__)
 
 History: TypeAlias = list[dict[str, JSON]]
 
@@ -174,7 +176,7 @@ def load_session_if_exists(session_name: str, sessions_dir: str) -> History:
             else:
                 logger.error(f"Session file {session_name} does not contain a valid history (expected a list of dicts).")
     except json.JSONDecodeError:
-        logger.opt(exception=True).error(f"Could not parse session file {session_name}. Starting new session.")
+        logger.exception(f"Could not parse session file {session_name}. Starting new session.")
 
     return history
 
@@ -256,13 +258,7 @@ def syntax_highlight(string: str, language: str) -> str:
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
     else:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=os.setsid
-        )
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
 
     output, error = process.communicate(input=string.encode("utf-8"))
 

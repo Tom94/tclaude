@@ -27,11 +27,13 @@ from typing import TextIO, override
 from urllib.parse import urlparse
 
 import aiohttp
-from loguru import logger
+import logging
 
 from .json import JSON, get, get_or, get_or_default
 from .tool_use import AvailableTools
 from .tools import ToolContentBase64Image, ToolContentText, ToolResult
+
+logger = logging.getLogger(__package__)
 
 
 class AuthenticationType(Enum):
@@ -305,7 +307,7 @@ class McpServerConfigs:
         # self._conns = [await conn for conn in conn_tasks]
 
         if self._conns:
-            logger.success(f"Connected to {len(self._conns)} MCP servers: {', '.join([c.name for c in self._conns])}")
+            logger.info(f"[✓] Connected to {len(self._conns)} MCP servers: {', '.join([c.name for c in self._conns])}")
 
         return self
 
@@ -337,7 +339,7 @@ class McpServerConfigs:
         self.local_servers = [s for s in self.local_servers if s.is_authenticated]
 
         if self.remote_servers:
-            logger.success(f"Authenticated {len(self.remote_servers)} remote MCP servers: {', '.join(s.name for s in self.remote_servers)}")
+            logger.info(f"[✓] Authenticated {len(self.remote_servers)} remote MCP servers: {', '.join(s.name for s in self.remote_servers)}")
 
     async def get_remote_server_descs(self, session: aiohttp.ClientSession) -> list[dict[str, JSON]]:
         return [await server.get_remote_server_desc(session) for server in self.remote_servers if server.url]

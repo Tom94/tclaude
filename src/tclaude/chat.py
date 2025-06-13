@@ -22,7 +22,7 @@ from contextlib import AsyncExitStack
 from itertools import chain
 
 import aiohttp
-from loguru import logger
+import logging
 from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
@@ -44,6 +44,8 @@ from .spinner import spinner
 from .terminal_prompt import terminal_prompt
 from .token_counter import TokenCounter
 from .tool_use import get_python_tools
+
+logger = logging.getLogger(__package__)
 
 
 def should_cache(tokens: TokenCounter, model: str) -> bool:
@@ -72,11 +74,11 @@ async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
             result = await task
             results.append(result)
         except aiohttp.ClientError as e:
-            logger.opt(exception=e).error(f"Failed to upload file: {e}")
-        except asyncio.CancelledError as e:
-            logger.opt(exception=e).error("File upload cancelled.")
+            logger.exception(f"Failed to upload file: {e}")
+        except asyncio.CancelledError:
+            logger.exception("File upload cancelled.")
         except Exception as e:
-            logger.opt(exception=e).error(f"Error during file upload: {e}")
+            logger.exception(f"Error during file upload: {e}")
 
     return results
 
@@ -317,7 +319,7 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
                 if isinstance(e, asyncio.CancelledError):
                     logger.error("Response cancelled.\n")
                 else:
-                    logger.opt(exception=e).error(f"Unexpected error: {e}. Please try again.\n")
+                    logger.exception(f"Unexpected error: {e}. Please try again.\n")
 
                 continue
             finally:
@@ -354,7 +356,7 @@ async def async_chat(args: TClaudeArgs, config: dict[str, JSON], history: Histor
             with open(session_path, "w") as f:
                 json.dump(session.history, f, indent=2)
 
-            logger.success(f"Saved session to {session_path}")
+            logger.info(f"[✓] Saved session to {session_path}")
 
     if args.verbose:
         session.total_tokens.print_tokens()

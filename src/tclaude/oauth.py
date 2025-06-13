@@ -34,12 +34,14 @@ import aiohttp
 import keyring
 import keyring.errors
 from aiohttp import web
-from loguru import logger
+import logging
 from multidict import MultiMapping
 from oauthlib.oauth2 import WebApplicationClient
 
 from . import __version__, common
 from .json import JSON, get, get_or
+
+logger = logging.getLogger(__package__)
 
 SOFTWARE_ID = "f4f90cea-20ab-4778-a1a3-3e8091d2f939"
 
@@ -58,8 +60,8 @@ async def get_server_metadata(session: aiohttp.ClientSession, name: str, server_
         with open(metadata_filename, "r") as f:
             try:
                 metadata = cast(dict[str, JSON], json.load(f))
-            except json.JSONDecodeError as e:
-                logger.opt(exception=e).warning(f"Failed to decode JSON from {metadata_filename}. Fetching fresh metadata.")
+            except json.JSONDecodeError:
+                logger.exception(f"Failed to decode JSON from {metadata_filename}. Fetching fresh metadata.")
                 metadata = None
 
         if metadata:
@@ -81,8 +83,8 @@ async def get_server_metadata(session: aiohttp.ClientSession, name: str, server_
             json.dump(metadata, f, indent=2)
 
         return metadata
-    except aiohttp.ClientError as e:
-        logger.opt(exception=e).debug(f"Failed to fetch metadata from {discovery_url}. Falling back to default endpoints.")
+    except aiohttp.ClientError:
+        logger.debug(f"Failed to fetch metadata from {discovery_url}. Falling back to default endpoints.", exc_info=True)
         return None
 
 
@@ -92,8 +94,8 @@ async def load_client_info_from_file(name: str) -> dict[str, JSON] | None:
         with open(client_info_filename, "r") as f:
             try:
                 client_info = cast(dict[str, JSON], json.load(f))
-            except json.JSONDecodeError as e:
-                logger.opt(exception=e).warning(f"Failed to decode JSON from {client_info_filename}. Registering new client.")
+            except json.JSONDecodeError:
+                logger.exception(f"Failed to decode JSON from {client_info_filename}. Registering new client.")
                 return None
 
         if client_info:
@@ -149,15 +151,15 @@ def get_token_from_keyring(name: str) -> dict[str, JSON] | None:
     try:
         token_json = keyring.get_password(service_name, "default")
     except keyring.errors.KeyringError as e:
-        logger.opt(exception=e).warning("Failed to retrieve token from keyring. Token will not be used.")
+        logger.exception(f"Failed to retrieve token from keyring: {e}. Token will not be used.")
         return None
 
     if not token_json:
         return None
     try:
         token = cast(dict[str, JSON], json.loads(token_json))
-    except json.JSONDecodeError as e:
-        logger.opt(exception=e).warning(f"Failed to decode token JSON for {name} from keyring.")
+    except json.JSONDecodeError:
+        logger.exception(f"Failed to decode token JSON for {name} from keyring.")
         return None
 
     if "access_token" not in token:
@@ -173,7 +175,7 @@ def save_token_to_keyring(name: str, token: dict[str, JSON]) -> None:
         keyring.set_password(service_name, "default", json.dumps(token))
         logger.debug(f"Stored token for {name} in keyring.")
     except keyring.errors.KeyringError as e:
-        logger.opt(exception=e).warning("Failed to store token in keyring. Token will not be persisted.")
+        logger.exception(f"Failed to store token in keyring: {e}. Token will not be persisted.")
 
 
 def is_expiring(token: dict[str, JSON], tolerance: float = 300) -> bool:
@@ -332,7 +334,7 @@ class OAuth2Client:
                 save_token_to_keyring(self.name, new_token)
                 return new_token
         except aiohttp.ClientError as e:
-            logger.opt(exception=e).error(f"Failed to refresh token for {self.name}: {e}. Re-authenticating...")
+            logger.exception(f"Failed to refresh token for {self.name}: {e}. Re-authenticating...")
             return await self.authenticate(session)
 
     async def get_token(self, session: aiohttp.ClientSession) -> dict[str, JSON]:

@@ -14,12 +14,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+
 import os
 import sys
 
-from . import common, logging
+import logging
+
+from . import common, logging_config
 from .config import parse_tclaude_args, load_config
 from .print import history_to_string, print_decoy_prompt
+
+logger = logging.getLogger(__package__)
 
 
 def read_user_input(input: list[str]) -> str:
@@ -44,7 +49,9 @@ def main():
         sys.exit(1)
 
     args = parse_tclaude_args()
-    logging.setup(verbose=args.verbose)
+    logging_config.setup(verbose=args.verbose)
+
+    logger.debug(f"Logging setup complete: verbose={args.verbose}")
 
     config = load_config(args.config)
 

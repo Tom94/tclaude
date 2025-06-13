@@ -24,12 +24,14 @@ from itertools import groupby
 from typing import cast
 
 from humanize import naturalsize
-from loguru import logger
+import logging
 
-from . import common, config, logging
+from . import common, config, logging_config
 from .common import History, escape, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
+
+logger = logging.getLogger(__package__)
 
 
 def rstrip(io: StringIO) -> StringIO:
@@ -439,7 +441,7 @@ def main():
 
     args = parser.parse_args(namespace=PrintArgs())
 
-    logging.setup(args.verbose)
+    logging_config.setup(verbose=args.verbose)
 
     # Load the history from the JSON file
     try:
@@ -452,9 +454,9 @@ def main():
         result = history_to_string(history, pretty=args.pretty, wrap_width=wrap_width)
         print(result, end="", flush=True)
     except json.JSONDecodeError:
-        logger.opt(exception=True).error(f"Could not parse JSON file {args.session}")
+        logger.exception(f"Could not parse JSON file {args.session}")
     except FileNotFoundError:
-        logger.opt(exception=True).error(f"Could not find session file {args.session}")
+        logger.exception(f"Could not find session file {args.session}")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__package__)
 
 
 class TokenCounter:
@@ -66,5 +68,3 @@ class TokenCounter:
     def print_cost(self, model: str):
         cache_creation_cost, cache_read_cost, input_cost, output_cost = self.cost(model)
         logger.info(f"Cost: cache_creation=${cache_creation_cost:.2f} cache_read=${cache_read_cost:.2f} input=${input_cost:.2f} output=${output_cost:.2f}")
-
-

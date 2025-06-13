@@ -32,7 +32,7 @@ from .common import History
 from .config import TClaudeArgs, load_system_prompt
 from .json import JSON
 from .live_print import live_print
-from .mcp import setup_mcp
+from .mcp import McpServerConfigs, setup_mcp
 from .print import history_to_string
 from .prompt import (
     Response,
@@ -41,6 +41,7 @@ from .prompt import (
 )
 from .session import ChatSession, deduce_session_name
 from .spinner import spinner
+from .task_context import TaskAsyncContextManager
 from .terminal_prompt import terminal_prompt
 from .token_counter import TokenCounter
 from .tool_use import get_python_tools
@@ -160,7 +161,9 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
         file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
-        mcp = await stack.enter_async_context(setup_mcp(client, config))
+        mcp_startup_cm = TaskAsyncContextManager(setup_mcp(client, config))
+        _ = stack.push_async_callback(mcp_startup_cm.stop)
+        mcp_setup: asyncio.Future[McpServerConfigs] | None = TaskAsyncContextManager(setup_mcp(client, config)).start()
 
         input = create_input(always_prefer_tty=True)
         output = create_output()
@@ -208,8 +211,8 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             elif num_uploaded_files > 0:
                 rprompt = f" {num_uploaded_files} files  {rprompt}"
 
-            # if mcp_setup_task and not mcp_setup_task.done():
-            #     rprompt = f" setting up mcp {spinner()}  {rprompt}"
+            if mcp_setup is not None and not mcp_setup.done():
+                rprompt = f" setting up mcp {spinner()}  {rprompt}"
 
             return f"{prefix}{rprompt}"
 
@@ -233,15 +236,10 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         _ = signal.signal(signal.SIGINT, interrupt_handler)
 
         available_tools, tool_definitions = get_python_tools()
-
-        mcp_tools, mcp_tool_definitions = mcp.get_tools()
-        available_tools.update(mcp_tools)
-        tool_definitions.extend(mcp_tool_definitions)
-
         logger.debug(f"Available tools: {', '.join(available_tools.keys())}")
 
+        mcp: McpServerConfigs | None = None
         response: Response | None = None
-        logger.debug("Started up.")
         while True:
             if is_user_turn:
                 try:
@@ -272,6 +270,14 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 if user_history_string:
                     print(user_history_string, end="\n\n")
 
+            if mcp_setup is not None:
+                mcp = await mcp_setup
+                mcp_setup = None
+
+                mcp_tools, mcp_tool_definitions = mcp.get_tools()
+                available_tools.update(mcp_tools)
+                tool_definitions.extend(mcp_tool_definitions)
+
             container = common.get_latest_container(session.history)
             write_cache = should_cache(response.tokens, args.model) if response is not None else False
 
@@ -282,6 +288,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 logger.info(f"write_cache={write_cache}")
 
             partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
+
             async def partial_history_or_spinner() -> str:
                 return await history_or_spinner(partial.messages)
 
@@ -297,7 +304,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                             enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
                             external_tools_available=available_tools,
                             external_tool_definitions=tool_definitions,
-                            mcp_remote_servers=await mcp.get_remote_server_descs(client),
+                            mcp_remote_servers=await mcp.get_remote_server_descs(client) if mcp else None,
                             system_prompt=session.system_prompt,
                             enable_thinking=args.thinking,
                             thinking_budget=args.thinking_budget,

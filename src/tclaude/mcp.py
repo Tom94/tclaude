@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from .json import JSON, get, get_or, get_or_default
+from .task_context import AsyncContextPool
 from .tool_use import AvailableTools
 from .tools import ToolContentBase64Image, ToolContentText, ToolResult
 
@@ -292,6 +293,7 @@ class McpServerConfigs:
         self._session: aiohttp.ClientSession = session
         self._conns: list[McpConnection] = []
         self._exit_stack: AsyncExitStack = AsyncExitStack()
+        self._connection_pool: AsyncContextPool = AsyncContextPool()
 
     async def __aenter__(self) -> McpServerConfigs:
         await self.ensure_auth(self._session)
@@ -299,12 +301,13 @@ class McpServerConfigs:
         if self._conns:
             raise RuntimeError("MCP servers are already connected. Call close() before reconnecting.")
 
-        self._conns = [await self._exit_stack.enter_async_context(s.connect()) for s in self.local_servers]
-
-        # async with TaskGroup() as tg:
-        #     conn_tasks = [tg.create_task(self._exit_stack.enter_async_context(s.connect())) for s in self.local_servers]
-
-        # self._conns = [await conn for conn in conn_tasks]
+        pool = await self._exit_stack.enter_async_context(AsyncContextPool())
+        conns = await pool.add_many(*[s.connect() for s in self.local_servers])
+        for conn in conns:
+            if isinstance(conn, BaseException):
+                logger.error(f"Error connecting to local MCP server: {conn}")
+            else:
+                self._conns.append(conn)
 
         if self._conns:
             logger.info(f"[✓] Connected to {len(self._conns)} MCP servers: {', '.join([c.name for c in self._conns])}")
@@ -345,15 +348,12 @@ class McpServerConfigs:
         return [await server.get_remote_server_desc(session) for server in self.remote_servers if server.url]
 
 
-@asynccontextmanager
-async def setup_mcp(session: aiohttp.ClientSession, config: dict[str, JSON]):
+def setup_mcp(session: aiohttp.ClientSession, config: dict[str, JSON]) -> McpServerConfigs:
     """
     Get the MCP configuration from the loaded config.
     """
     if "mcp" not in config:
-        async with McpServerConfigs(session, remote_servers=[], local_servers=[]) as mcp:
-            yield mcp
-        return
+        return McpServerConfigs(session, remote_servers=[], local_servers=[])
 
     remote_servers: list[McpServerConfig] = []
     for s in get_or_default(config["mcp"], "remote_servers", list[dict[str, JSON]]):
@@ -373,5 +373,4 @@ async def setup_mcp(session: aiohttp.ClientSession, config: dict[str, JSON]):
         except ValueError as e:
             logger.error(f"Error parsing local MCP server configuration: {e}")
 
-    async with McpServerConfigs(session, remote_servers=remote_servers, local_servers=local_servers) as mcp:
-        yield mcp
+    return McpServerConfigs(session, remote_servers=remote_servers, local_servers=local_servers)

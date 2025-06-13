@@ -161,9 +161,12 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
         file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
-        mcp_startup_cm = TaskAsyncContextManager(setup_mcp(client, config))
-        _ = stack.push_async_callback(mcp_startup_cm.stop)
-        mcp_setup: asyncio.Future[McpServerConfigs] | None = TaskAsyncContextManager(setup_mcp(client, config)).start()
+        mcp = setup_mcp(client, config)
+        mcp_setup: asyncio.Future[McpServerConfigs] | None = None
+        if not mcp.empty:
+            mcp_startup_cm = TaskAsyncContextManager(mcp)
+            _ = stack.push_async_callback(mcp_startup_cm.stop)
+            mcp_setup = TaskAsyncContextManager(setup_mcp(client, config)).start()
 
         input = create_input(always_prefer_tty=True)
         output = create_output()
@@ -238,7 +241,6 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         available_tools, tool_definitions = get_python_tools()
         logger.debug(f"Available tools: {', '.join(available_tools.keys())}")
 
-        mcp: McpServerConfigs | None = None
         response: Response | None = None
         while True:
             if is_user_turn:
@@ -304,7 +306,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                             enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
                             external_tools_available=available_tools,
                             external_tool_definitions=tool_definitions,
-                            mcp_remote_servers=await mcp.get_remote_server_descs(client) if mcp else None,
+                            mcp_remote_servers=await mcp.get_remote_server_descs(client),
                             system_prompt=session.system_prompt,
                             enable_thinking=args.thinking,
                             thinking_budget=args.thinking_budget,

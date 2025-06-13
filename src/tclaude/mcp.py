@@ -295,6 +295,10 @@ class McpServerConfigs:
         self._exit_stack: AsyncExitStack = AsyncExitStack()
         self._connection_pool: AsyncContextPool = AsyncContextPool()
 
+    @property
+    def empty(self) -> bool:
+        return not self.remote_servers and not self.local_servers
+
     async def __aenter__(self) -> McpServerConfigs:
         await self.ensure_auth(self._session)
 

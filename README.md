@@ -16,8 +16,7 @@ As such, Claude-specific features like caching, Claude-native web search or code
 ## Installation
 
 ```bash
-git clone https://github.com/tom94/tclaude
-pip install . --user
+pip install tclaude
 ```
 
 Then set the `ANTHROPIC_API_KEY` environment variable to your [Claude API key](https://console.anthropic.com/settings/keys) and you are good to go.

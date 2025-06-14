@@ -32,6 +32,12 @@ class TaskAsyncContextManager(Generic[T]):
         self.task: asyncio.Task[None] | None = None
         self.ready_future: asyncio.Future[T] | None = None
 
+    async def __aenter__(self) -> asyncio.Future[T]:
+        return self.start()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        await self.stop()
+
     def start(self) -> asyncio.Future[T]:
         """Start the context manager and return the resource"""
         if self.task is not None:

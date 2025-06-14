@@ -32,7 +32,7 @@ from .common import History
 from .config import TClaudeArgs, load_system_prompt
 from .json import JSON
 from .live_print import live_print
-from .mcp import McpServerConfigs, setup_mcp
+from .mcp import setup_mcp
 from .print import history_to_string
 from .prompt import (
     Response,
@@ -162,11 +162,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
 
         mcp = setup_mcp(client, config)
-        mcp_setup: asyncio.Future[McpServerConfigs] | None = None
-        if not mcp.empty:
-            mcp_startup_cm = TaskAsyncContextManager(mcp)
-            _ = stack.push_async_callback(mcp_startup_cm.stop)
-            mcp_setup = TaskAsyncContextManager(setup_mcp(client, config)).start()
+        mcp_setup = None if mcp.empty else await stack.enter_async_context(TaskAsyncContextManager(mcp))
 
         input = create_input(always_prefer_tty=True)
         output = create_output()

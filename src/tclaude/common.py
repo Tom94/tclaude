@@ -334,10 +334,12 @@ def char_wrap(text: str, wrap_width: int) -> str:
 
 
 def word_wrap(text: str, wrap_width: int) -> str:
+    from wcwidth import wcswidth  # pyright: ignore
+
+    wrap_indicator = " ↩"
+    wrap_width -= wcswidth(wrap_indicator)
     if not text or wrap_width <= 0:
         return text
-
-    from wcwidth import wcswidth  # pyright: ignore
 
     lines: list[str] = []
 
@@ -368,7 +370,7 @@ def word_wrap(text: str, wrap_width: int) -> str:
             if word_width > available_width and available_width > 0:
                 # First, add any current line content
                 if current_line:
-                    lines.append(indent + " ".join(current_line))
+                    lines.append(f"{indent}{' '.join(current_line)}{wrap_indicator}")
                     current_line = []
 
                 # Split the long word into chunks by character
@@ -378,7 +380,7 @@ def word_wrap(text: str, wrap_width: int) -> str:
                 for char in word:
                     char_width = wcswidth(char)
                     if current_chunk_width + char_width > available_width and current_chunk:
-                        lines.append(indent + current_chunk)
+                        lines.append(f"{indent}{current_chunk}{wrap_indicator}")
                         current_chunk = char
                         current_chunk_width = char_width
                     else:
@@ -392,7 +394,7 @@ def word_wrap(text: str, wrap_width: int) -> str:
                 test_line = " ".join(current_line + [word])
                 test_line_width = wcswidth(indent + test_line)
                 if test_line_width > wrap_width and current_line:
-                    lines.append(indent + " ".join(current_line))
+                    lines.append(f"{indent}{' '.join(current_line)}{wrap_indicator}")
                     current_line = [word]
                 else:
                     current_line.append(word)

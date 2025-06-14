@@ -95,6 +95,7 @@ class TClaudeArgs(argparse.Namespace):
         self.model: str = "claude-sonnet-4-0"
         self.no_code_execution: bool = False
         self.no_web_search: bool = False
+        self.print_history: bool = False
         self.role: str | None = default_role
         self.session: str | None = None
         self.sessions_dir: str = default_sessions_dir()
@@ -114,6 +115,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-0)")
     _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
+    _ = parser.add_argument("-p", "--print_history", help="Print the conversation history only, without prompting.", action="store_true")
     _ = parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt (default: default.md)")
     _ = parser.add_argument("-s", "--session", help="Path to session file for conversation history")
     _ = parser.add_argument("--sessions-dir", help="Path to directory for session files (default: current directory)")

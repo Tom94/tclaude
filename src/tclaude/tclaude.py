@@ -55,6 +55,10 @@ async def async_main():
     config = load_config(args.config)
 
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
+    if args.print_history:
+        print(await history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), flush=True)
+        return
+
     user_input = read_user_input(args.input)
 
     # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)

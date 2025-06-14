@@ -414,7 +414,7 @@ async def history_to_string(
     return rstrip(io).getvalue()
 
 
-def print_decoy_prompt(user_input: str):
+def print_decoy_prompt(user_input: str, wrap_width: int):
     """
     Reproduce the initial prompt that prompt_toolkit will produce. Requires a bit of bespoke formatting to match exactly.
     """
@@ -422,7 +422,7 @@ def print_decoy_prompt(user_input: str):
         print(f"{common.prompt_style(common.CHEVRON)} {user_input}")
         return
 
-    initial_prompt = common.char_wrap(f"  {common.HELP_TEXT}", os.get_terminal_size().columns - 2)
+    initial_prompt = common.char_wrap(f"  {common.HELP_TEXT}", wrap_width - 2)
     num_newlines = initial_prompt.count("\n")
     ansi_return: str = "\033[F" * num_newlines + common.ansi("3G")
     print(f"{common.prompt_style(common.CHEVRON)} {common.gray_style(initial_prompt[2:])}{ansi_return}", end="", flush=True)

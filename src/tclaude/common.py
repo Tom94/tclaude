@@ -45,6 +45,17 @@ ANSI_RESET = ansi("0m")
 ANSI_BEGINNING_OF_LINE = ansi("1G")
 
 
+def get_wrap_width() -> int:
+    if sys.stdout.isatty():
+        return os.get_terminal_size().columns
+    if "FZF_PREVIEW_COLUMNS" in os.environ:
+        try:
+            return int(os.environ["FZF_PREVIEW_COLUMNS"])
+        except ValueError:
+            pass
+    return -1  # No wrapping in non-TTY environments
+
+
 def wrap_style(msg: str, cmd: str, pretty: bool = True) -> str:
     if pretty:
         return f"{ansi(cmd)}{msg}{ANSI_RESET}"

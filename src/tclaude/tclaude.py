@@ -47,6 +47,8 @@ async def async_main():
         )
         sys.exit(1)
 
+    wrap_width = common.get_wrap_width()
+
     args = parse_tclaude_args()
     logging_config.setup(verbose=args.verbose)
 
@@ -56,13 +58,13 @@ async def async_main():
 
     history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
     if args.print_history:
-        print(await history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), flush=True)
+        print(await history_to_string(history, pretty=True, wrap_width=wrap_width), flush=True)
         return
 
     user_input = read_user_input(args.input)
 
     # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)
-    if not os.isatty(1):
+    if not sys.stdout.isatty():
         if not user_input:
             print("No input provided.", file=sys.stderr)
             sys.exit(1)
@@ -73,12 +75,12 @@ async def async_main():
         return
 
     if history:
-        print(await history_to_string(history, pretty=True, wrap_width=os.get_terminal_size().columns), end="\n\n")
+        print(await history_to_string(history, pretty=True, wrap_width=wrap_width), end="\n\n")
 
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
     if not user_input:
-        print_decoy_prompt("")
+        print_decoy_prompt("", wrap_width)
 
     from . import chat
 

@@ -188,7 +188,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             return current_message if current_message else f"{spinner()} "
 
         def lprompt(prefix: str) -> str:
-            return f"{prefix}{common.prompt_style(common.CHEVRON)} "
+            return f"{prefix}{common.CHEVRON} "
 
         def rprompt(prefix: str) -> str:
             rprompt = f"{session.total_tokens.total_cost(session.model):.03f}   {common.friendly_model_name(session.model)} "

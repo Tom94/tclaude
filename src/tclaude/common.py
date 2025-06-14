@@ -59,20 +59,20 @@ def get_wrap_width() -> int:
 
 def wrap_style(msg: str, cmd: str, pretty: bool = True) -> str:
     if pretty:
-        return f"{ansi(cmd)}{msg}{ANSI_RESET}"
+        return f"{cmd}{msg}{ANSI_RESET}"
     return msg
 
 
 def prompt_style(msg: str) -> str:
-    return wrap_style(msg, "0;35m")  # magenta
+    return wrap_style(msg, ansi("0;35m"))  # magenta
 
 
 def gray_style(msg: str) -> str:
-    return wrap_style(msg, "38;5;245m")  # gray
+    return wrap_style(msg, ANSI_MID_GRAY)
 
 
 def input_style(msg: str) -> str:
-    return wrap_style(msg, "1m")  # bold
+    return wrap_style(msg, ansi("1m"))  # bold
 
 
 def escape(text: str) -> str:
@@ -224,12 +224,22 @@ def friendly_model_name(model: str) -> str:
     return f"{kind} {version}"
 
 
-def make_check_bat_available() -> Callable[[], bool]:
+def make_check_bat_available() -> Callable[[], tuple[bool, list[str]]]:
     is_bat_available = None
+    default_opts: list[str] = []
 
-    def check_bat_available() -> bool:
+    def check_bat_available() -> tuple[bool, list[str]]:
         nonlocal is_bat_available
+
         if is_bat_available is None:
+            # Default to vs code dark theme if no theme set
+            if "BAT_THEME_DARK" not in os.environ:
+                default_opts.extend(["--theme-dark", "Visual Studio Dark+"])
+
+            # Nested calls to bat don't allow bat to detect the terminal theme, so we set it explicitly to dark mode if not set system-wide.
+            if "BAT_THEME" not in os.environ:
+                default_opts.extend(["--theme", "dark"])
+
             import subprocess
 
             try:
@@ -239,7 +249,7 @@ def make_check_bat_available() -> Callable[[], bool]:
                 is_bat_available = False
                 logger.warning("Install `bat` (https://github.com/sharkdp/bat) to enable syntax highlighting.")
 
-        return is_bat_available
+        return is_bat_available, default_opts
 
     return check_bat_available
 
@@ -252,13 +262,15 @@ async def syntax_highlight(string: str, language: str) -> str:
     Turn string pretty by piping it through bat
     """
 
-    if not check_bat_available():
+    is_available, default_opts = check_bat_available()
+    if not is_available:
         return string
 
     import asyncio
     import subprocess
 
     command = ["bat", "--force-colorization", "--italic-text=always", "--paging=never", "--style=plain", f"--language={language}"]
+    command.extend(default_opts)
 
     # Use bat to pretty print the string. Spawn in new process group to avoid issues with Ctrl-C handling.
     if sys.platform == "win32":
@@ -281,7 +293,6 @@ async def syntax_highlight(string: str, language: str) -> str:
         )
 
     output, error = await process.communicate(input=string.encode("utf-8"))
-
     if process.returncode != 0:
         raise Exception(f"Error: {error.decode('utf-8')}")
     return output.decode("utf-8")

@@ -14,11 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import argparse
-import asyncio
 import json
 import logging
-import os
 from dataclasses import dataclass
 from functools import partial
 from io import StringIO
@@ -28,8 +25,8 @@ from urllib.parse import urlparse
 
 from humanize import naturalsize
 
-from . import common, config, logging_config
-from .common import History, escape, wrap_style
+from . import common
+from .common import History, ansi, escape, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
 
@@ -74,15 +71,15 @@ def write_block(heading: str, block_text: str, io: StringIO, pretty: bool, color
 
 
 def write_call_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
-    write_block(heading, block_text, io, pretty, color="0;35m", wrap_width=wrap_width)
+    write_block(heading, block_text, io, pretty, color=ansi("0;35m"), wrap_width=wrap_width)
 
 
 def write_result_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
-    write_block(heading, block_text, io, pretty, color="0;36m", wrap_width=wrap_width)
+    write_block(heading, block_text, io, pretty, color=ansi("0;36m"), wrap_width=wrap_width)
 
 
 def write_error_block(heading: str, block_text: str, io: StringIO, pretty: bool, wrap_width: int):
-    write_block(heading, block_text, io, pretty, color="0;91m", wrap_width=wrap_width)
+    write_block(heading, block_text, io, pretty, color=ansi("0;91m"), wrap_width=wrap_width)
 
 
 def gather_tool_results(messages: History) -> dict[str, JSON]:

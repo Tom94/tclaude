@@ -138,7 +138,10 @@ async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: His
             if not response.call_again:
                 break
 
-    print(await history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
+    try:
+        print(await history_to_string(history[response_idx:], pretty=False, text_only=print_text_only), end="", flush=True)
+    except BrokenPipeError:
+        logger.error("Broken pipe. Response could not passed on to the next command in the pipeline.")
 
 
 async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):

@@ -24,6 +24,7 @@ from functools import partial
 from io import StringIO
 from itertools import groupby
 from typing import cast
+from urllib.parse import urlparse
 
 from humanize import naturalsize
 
@@ -118,7 +119,13 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
 
         # Server tool results:
         case {"type": "web_search_tool_result", "content": list(results)}:
-            write_result_block("Result", f"Found {len(results)} references. See citations below.", io, pretty, wrap_width)
+            write_result_block(
+                "Result",
+                f"Found {len(results)} references: {', '.join([urlparse(get_or(r, 'url', '')).hostname or '<unknown>' for r in results])}",
+                io,
+                pretty,
+                wrap_width,
+            )
         case {"type": "code_execution_tool_result", "content": {"type": "code_execution_result", **content}}:
             result_io = StringIO()
             return_code = get_or(content, "return_code", 0)

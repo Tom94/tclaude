@@ -238,6 +238,7 @@ def write_user_message(
     text_only: bool,
 ):
     prompt = f"{common.CHEVRON} "
+    prompt_len = len(prompt)
     if pretty:
         prompt = common.prompt_style(prompt)
 
@@ -250,7 +251,12 @@ def write_user_message(
         match content_block:
             case {"type": "text", "text": str(input)}:
                 if not skip_user_text:
-                    _ = io.write(f"{prompt}{common.input_style(input) if pretty else input}\n")
+                    text = common.word_wrap(input, wrap_width - 2)
+                    for i, li in enumerate(text.splitlines()):
+                        if pretty:
+                            li = common.input_style(li)
+                        prefix = prompt if i == 0 else (" " * prompt_len)
+                        _ = io.write(f"{prefix}{li}\n")
             case {"type": "document" | "image", "source": {"file_id": str(file_id)}}:
                 files[file_id] = cast(str, content_block["type"])  # We know this is a str because of the match case
             case {"type": "container_upload", "file_id": str(file_id)}:

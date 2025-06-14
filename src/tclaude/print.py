@@ -151,7 +151,11 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
             # Special case for fetching html content, which would take up a lot of space if printed.
             if not is_error and get_or(tool_use, "name", "<unknown>") == "fetch_url":
                 content = get_or_default(tool_result, "content", list[dict[str, str]])
-                num_lines = content[0]["text"].count("\n") + 1
+                if content:
+                    text = get_or(content[0], "text", "<unknown>")
+                else:
+                    text = get_or(tool_result, "content", "<unknown>")
+                num_lines = text.count("\n") + 1
                 write_fun(f"Fetched HTML and converted it to {num_lines} lines of markdown text.", io, pretty, wrap_width)
                 return
 

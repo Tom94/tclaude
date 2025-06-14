@@ -22,4 +22,4 @@ interactive chat, resumable sessions, extended thinking, file operations,
 web search, code execution, and custom tools.
 """
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"

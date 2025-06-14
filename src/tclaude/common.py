@@ -29,6 +29,7 @@ History: TypeAlias = list[dict[str, JSON]]
 
 
 CHEVRON = ""
+CHEVRON_CONTINUATION = "·"
 HELP_TEXT = "Type your message and hit Enter. Ctrl-D to exit, ESC for Vi mode, \\-Enter for newline."
 
 

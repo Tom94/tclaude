@@ -101,6 +101,7 @@ async def terminal_prompt(
                 cursor=ModalCursorShapeConfig(),
                 multiline=True,
                 wrap_lines=True,
+                prompt_continuation=ANSI(f"{common.prompt_style(common.CHEVRON_CONTINUATION)} "),
                 placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
                 key_bindings=key_bindings,
                 refresh_interval=1 / SPINNER_FPS,

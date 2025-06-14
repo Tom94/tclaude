@@ -243,8 +243,10 @@ def write_user_message(
 ):
     prompt = f"{common.CHEVRON} "
     prompt_len = len(prompt)
+    prompt_continuation = f"{common.CHEVRON_CONTINUATION}" + " " * (prompt_len - len(common.CHEVRON_CONTINUATION))
     if pretty:
         prompt = common.prompt_style(prompt)
+        prompt_continuation = common.prompt_style(prompt_continuation)
 
     files: dict[str, str] = {}
 
@@ -259,7 +261,7 @@ def write_user_message(
                     for i, li in enumerate(text.splitlines()):
                         if pretty:
                             li = common.input_style(li)
-                        prefix = prompt if i == 0 else (" " * prompt_len)
+                        prefix = prompt if i == 0 else prompt_continuation
                         _ = io.write(f"{prefix}{li}\n")
             case {"type": "document" | "image", "source": {"file_id": str(file_id)}}:
                 files[file_id] = cast(str, content_block["type"])  # We know this is a str because of the match case

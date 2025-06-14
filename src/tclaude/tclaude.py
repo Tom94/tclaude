@@ -39,6 +39,45 @@ def read_user_input(input: list[str]) -> str:
     return user_input
 
 
+async def fzf_sessions(sessions_dir: str) -> str:
+    # Find session files in the sessions directory
+    session_files = [f for f in os.listdir(sessions_dir) if os.path.isfile(os.path.join(sessions_dir, f)) and f.endswith(".json")]
+
+    try:
+        opts = ["--preview", "tclaude -p -s {}"]
+
+        # If the user did not customize their fzf, we set some tclaude-specific defaults.
+        if "FZF_DEFAULT_OPTS" not in os.environ:
+            opts.extend(
+                [
+                    "--color=hl:12,hl+:12,prompt:5,query:7,pointer:5,info:244,spinner:5,header:7,marker:12",
+                    '--bind=ctrl-d:preview-down,ctrl-u:preview-up',
+                    "--prompt= ",
+                    "--preview-window=60%",
+                    "--height=40%",
+                    "--layout=reverse",
+                ]
+            )
+
+        process = await asyncio.create_subprocess_exec(
+            "fzf",
+            *opts,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        output, error = await process.communicate(input="\n".join(session_files).encode())
+        if error:
+            print(f"Error running fzf: {error.decode().strip()}", file=sys.stderr)
+            sys.exit(1)
+
+        return output.decode().strip()
+    except FileNotFoundError:
+        print("fzf is not installed. Please install it to use session selection.", file=sys.stderr)
+        sys.exit(1)
+
+
 async def async_main():
     if "ANTHROPIC_API_KEY" not in os.environ:
         print(
@@ -53,6 +92,9 @@ async def async_main():
     logging_config.setup(verbose=args.verbose)
 
     logger.debug(f"Logging setup complete: verbose={args.verbose}")
+
+    if args.session == "fzf":
+        args.session = await fzf_sessions(args.sessions_dir)
 
     config = load_config(args.config)
 

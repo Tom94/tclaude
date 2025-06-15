@@ -23,6 +23,7 @@ import os
 
 import aiofiles.os
 import aiohttp
+from humanize import naturalsize
 
 from . import common, files, prompt
 from .common import History, is_valid_metadata
@@ -108,6 +109,17 @@ class ChatSession:
             del self.uploaded_files[file_id]
 
         self.erase_invalid_file_content_blocks()
+
+        downloadable_files = [m for m in self.uploaded_files.values() if is_valid_metadata(m) and m.get("downloadable")]
+        if downloadable_files:
+            logger.info("Downloadable files are available. Type `/download` to download them.")
+            for metadata in downloadable_files:
+                match metadata:
+                    case {"id": str(file_id), "filename": str(file_name), "size_bytes": int(num_bytes)}:
+                        logger.info(f"- {file_name}, {naturalsize(num_bytes)} ({file_id})")
+                    case _:
+                        logger.warning(f"Unexpected metadata format for downloadable file: {metadata}")
+
 
     async def upload_file(self, client_session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
         if not await aiofiles.os.path.isfile(file_path):

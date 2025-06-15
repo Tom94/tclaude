@@ -133,16 +133,48 @@ def get_latest_container(messages: History) -> Container | None:
     return None
 
 
-def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
+def is_valid_metadata(metadata: dict[str, JSON]) -> bool:
+    return get(metadata, "id", str) is not None
+
+
+def get_uploaded_files(messages: History) -> dict[str, dict[str, JSON]]:
     """
-    Process the initial history to extract user messages and uploaded files.
-    Returns a tuple of:
-    - A list of user messages as strings.
-    - A dictionary of uploaded files with their file IDs as keys and metadata as values.
+    Extract uploaded files from history.
+    """
+    uploaded_files: dict[str, dict[str, JSON]] = {}
+
+    for message in messages:
+        for content_block in get_or_default(message, "content", list[JSON]):
+            match content_block:
+                case {"type": "container_upload", "file_id": str(file_id)} | {
+                    "type": "document" | "image",
+                    "source": {"file_id": str(file_id)},
+                }:
+                    # This removes the _input_pending flag if it exists, which is intended because this user message *is* the input.
+                    uploaded_files[file_id] = {}
+                case {"type": "tool_result"}:
+                    # TODO: Handle tool results that involve image uploads
+                    pass
+                case {"type": "code_execution_tool_result", "content": {"type": "code_execution_result", "content": list(code_exec_content)}}:
+                    for c in code_exec_content:
+                        match c:
+                            case {"type": "code_execution_output", "file_id": str(file_id)}:
+                                # Code-execution outputs need to be re-input by the user to make them available to the model.
+                                uploaded_files[file_id] = {"_input_pending": True}
+                            case _:
+                                # TODO: handle other code execution content types
+                                pass
+                case _:
+                    pass
+
+    return uploaded_files
+
+
+def get_user_messages(history: History) -> list[str]:
+    """
+    Extract user messages from history.
     """
     user_messages: list[str] = []
-    uploaded_files: dict[str, JSON] = {}
-
     for message in history:
         if get(message, "role", str) != "user":
             continue
@@ -151,17 +183,17 @@ def process_user_blocks(history: History) -> tuple[list[str], dict[str, JSON]]:
             match content_block:
                 case {"type": "text", "text": str(text)}:
                     user_messages.append(text)
-                case {"type": "container_upload", "file_id": str(file_id)} | {
+                case {"type": "container_upload", "file_id": str()} | {
                     "type": "document" | "image",
-                    "source": {"file_id": str(file_id)},
+                    "source": {"file_id": str()},
                 }:
-                    uploaded_files[file_id] = {}
+                    pass
                 case {"type": "tool_result"}:
                     pass
                 case _:
                     logger.warning(f"Unknown content block type in user message: {content_block}")
 
-    return user_messages, uploaded_files
+    return user_messages
 
 
 def load_session_if_exists(session_name: str, sessions_dir: str) -> History:

@@ -235,7 +235,7 @@ def write_user_message(
     pretty: bool,
     wrap_width: int,
     skip_user_text: bool,
-    uploaded_files: dict[str, JSON] | None,
+    uploaded_files: dict[str, dict[str, JSON]] | None,
     text_only: bool,
 ):
     prompt = f"{common.CHEVRON} "
@@ -405,7 +405,7 @@ async def history_to_string(
     pretty: bool,
     wrap_width: int = 0,
     skip_user_text: bool = False,
-    uploaded_files: dict[str, JSON] | None = None,
+    uploaded_files: dict[str, dict[str, JSON]] | None = None,
     text_only: bool = False,
 ) -> str:
     tool_results = gather_tool_results(history)

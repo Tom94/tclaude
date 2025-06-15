@@ -28,9 +28,9 @@ from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
 from . import common
-from .common import History
+from .common import History, is_valid_metadata
 from .config import TClaudeArgs, load_system_prompt
-from .json import JSON
+from .json import JSON, get_or
 from .live_print import live_print
 from .mcp import setup_mcp
 from .print import history_to_string
@@ -65,14 +65,15 @@ def should_cache(tokens: TokenCounter, model: str) -> bool:
     return cache_read_cost < input_cost
 
 
-async def gather_file_uploads(tasks: list[asyncio.Task[JSON]]) -> list[JSON]:
+async def gather_file_uploads(tasks: list[asyncio.Task[dict[str, JSON]]]) -> list[dict[str, JSON]]:
     """
     Wait for all file upload tasks to complete and return the results.
     """
-    results: JSON = []
+    results: list[dict[str, JSON]] = []
     for task in asyncio.as_completed(tasks):
         try:
             result = await task
+            result["_input_pending"] = True  # Mark this file as pending being input in the next user message
             results.append(result)
         except aiohttp.ClientError as e:
             logger.exception(f"Failed to upload file: {e}")
@@ -203,7 +204,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             if file_upload_verification_task and not file_upload_verification_task.done():
                 rprompt = f" verifying files {spinner()}  {rprompt}"
 
-            num_uploaded_files = sum(1 for m in session.uploaded_files.values() if m is not None)
+            num_uploaded_files = sum(1 for m in session.uploaded_files.values() if is_valid_metadata(m))
             num_uploading = sum(1 for t in file_upload_tasks if not t.done())
 
             num_total_files = num_uploaded_files + num_uploading
@@ -257,11 +258,15 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                         await file_upload_verification_task
 
                 async with live_print(lambda: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
-                    file_metadata = await gather_file_uploads(file_upload_tasks)
+                    _ = await gather_file_uploads(file_upload_tasks)
                 file_upload_tasks.clear()
 
+                files_to_input = [m for m in session.uploaded_files.values() if get_or(m, "_input_pending", False)]
+                for metadata in session.uploaded_files.values():
+                    _ = metadata.pop("_input_pending", None)
+
                 user_content: list[JSON] = [{"type": "text", "text": user_input}]
-                user_content.extend(chain.from_iterable(file_metadata_to_content(m) for m in file_metadata if m))
+                user_content.extend(chain.from_iterable(file_metadata_to_content(m) for m in files_to_input if m))
                 user_input = ""
 
                 session.history.append({"role": "user", "content": user_content})
@@ -334,8 +339,14 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             finally:
                 stream_task = None
 
+            new_uploaded_files = common.get_uploaded_files(response.messages)
+
             session.history.extend(response.messages)
             session.total_tokens += response.tokens
+
+            if new_uploaded_files:
+                session.uploaded_files.update(new_uploaded_files)
+                file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))
 
             print("\n")
             if args.verbose:

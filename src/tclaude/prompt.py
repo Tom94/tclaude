@@ -268,24 +268,7 @@ async def stream_response(
     # Strangely, Anthropic's API sometimes returns empty text blocks (usually at the beginning of a message right before its first
     # citation). Returning these blocks to the API causes bad request errors, so we filter them out. Non-thinking empty blocks are filtered
     # just in case; I've never seen them in practice.
-    def is_content_block_valid(content_block: JSON) -> bool:
-        match content_block:
-            case (
-                {"type": "thinking", "thinking": ""}
-                | {"type": "signature", "signature": ""}
-                | {"type": "text", "text": ""}
-                | {"type": "citations", "citations": []}
-            ):
-                logger.warning(f"Content block {content_block} is empty, removing it.")
-                return False
-            case _:
-                return True
-
-    for message in messages:
-        content_blocks = get_or_default(message, "content", list[dict[str, JSON]])
-        if not content_blocks:
-            logger.warning("Message has no content blocks.")
-        message["content"] = [cb for cb in content_blocks if is_content_block_valid(cb)]
+    messages = filter_invalid_messages(messages)
 
     stop_reason = "unknown" if not messages else messages[-1].get("stop_reason")
     if stop_reason == "pause_turn":
@@ -301,6 +284,34 @@ async def stream_response(
         tokens=tokens,
         call_again=call_again,
     )
+
+
+def filter_invalid_messages(messages: History) -> History:
+    def is_content_block_valid(content_block: JSON) -> bool:
+        match content_block:
+            case (
+                {"type": "thinking", "thinking": ""}
+                | {"type": "signature", "signature": ""}
+                | {"type": "text", "text": ""}
+                | {"type": "citations", "citations": []}
+            ):
+                logger.warning(f"Content block {content_block} is empty, removing it.")
+                return False
+            case _:
+                return True
+
+    result: History = []
+
+    for message in messages:
+        content_blocks = get_or_default(message, "content", list[dict[str, JSON]])
+        if not content_blocks:
+            logger.warning("Message has no content. Removing it.")
+            continue
+
+        message["content"] = [cb for cb in content_blocks if is_content_block_valid(cb)]
+        result.append(message)
+
+    return result
 
 
 def file_metadata_to_content(metadata: JSON) -> list[JSON]:

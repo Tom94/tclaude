@@ -25,7 +25,7 @@ import aiofiles.os
 import aiohttp
 
 from . import common, files, prompt
-from .common import History
+from .common import History, is_valid_metadata
 from .json import JSON, get, get_or_default
 from .print import history_to_string
 from .token_counter import TokenCounter
@@ -50,9 +50,8 @@ class ChatSession:
         self.autoname_task: asyncio.Task[None] | None = None
 
         # Extract metadata from the history, like info about files we previously uploaded and older user messages.
-        self.user_messages: list[str] = []
-        self.uploaded_files: dict[str, JSON] = {}
-        self.user_messages, self.uploaded_files = common.process_user_blocks(history)
+        self.user_messages: list[str] = common.get_user_messages(history)
+        self.uploaded_files: dict[str, dict[str, JSON]] = common.get_uploaded_files(history)
 
     # -------------------------------------
     # File things
@@ -88,31 +87,32 @@ class ChatSession:
             return
 
         get_file_metadata_task = asyncio.gather(
-            *(files.get_file_metadata(client_session, file_id) for file_id in self.uploaded_files.keys()), return_exceptions=True
+            *(files.get_file_metadata(client_session, file_id) for file_id, m in self.uploaded_files.items() if not is_valid_metadata(m)),
+            return_exceptions=True,
         )
 
         metadata_list = await get_file_metadata_task
         for metadata in metadata_list:
             match metadata:
                 case {"id": str(file_id)}:
-                    self.uploaded_files[file_id] = metadata
+                    self.uploaded_files[file_id].update(metadata)
                 case BaseException() as e:
                     logger.error(f"Failed to verify file upload: {e}")
                 case _:
                     logger.warning(f"Unexpected metadata format: {metadata}. Expected a JSON object with an 'id' field.")
 
         # Remove any files that were not found or had an error
-        missing_files = [file_id for file_id, metadata in self.uploaded_files.items() if not metadata]
+        missing_files = [file_id for file_id, metadata in self.uploaded_files.items() if not is_valid_metadata(metadata)]
         for file_id in missing_files:
             logger.warning(f"File ID `{file_id}` is missing. Please re-upload it.")
             del self.uploaded_files[file_id]
 
         self.erase_invalid_file_content_blocks()
 
-    async def upload_file(self, client_session: aiohttp.ClientSession, file_path: str) -> JSON:
+    async def upload_file(self, client_session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
         if not await aiofiles.os.path.isfile(file_path):
             logger.error(f"File {file_path} does not exist or is not a file.")
-            return None
+            raise FileNotFoundError(f"File {file_path} does not exist or is not a file.")
 
         result = await files.upload_file(client_session, file_path)
         file_id = get(result, "id", str)

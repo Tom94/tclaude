@@ -72,7 +72,7 @@ async def rm_file(session: aiohttp.ClientSession, file_id: str) -> JSON:
     return data
 
 
-async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
+async def upload_file(session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
     url, headers = endpoints.get_files_endpoint_anthropic()
 
     try:
@@ -91,9 +91,9 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
 
         async with session.post(url, headers=headers, data=form_data) as response:
             response.raise_for_status()
-            data = cast(JSON, await response.json())
+            data = cast(dict[str, JSON], await response.json())
     except aiohttp.ClientResponseError as e:
-        data = {
+        data: dict[str, JSON] = {
             "error": {
                 "message": f"Failed to upload file {file_path}: {e.message}",
                 "status": e.status,
@@ -103,21 +103,21 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> JSON:
     return data
 
 
-async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> JSON:
+async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> dict[str, JSON]:
     url, headers = endpoints.get_files_endpoint_anthropic()
     url += f"/{file_id}"
 
     try:
         async with session.get(url, headers=headers) as response:
             response.raise_for_status()
-            data = cast(JSON, await response.json())
+            data = cast(dict[str, JSON], await response.json())
     except aiohttp.ClientResponseError as e:
         raise FileNotFoundError(f"Failed to get metadata for file {file_id}: {e.message}") from e
 
     return data
 
 
-async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> JSON | None:
+async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> dict[str, JSON] | None:
     """
     Get file metadata, returning None if the file does not exist.
     """
@@ -127,7 +127,7 @@ async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str
         return None
 
 
-def get_path_from_metadata(file_id: str, metadata: JSON) -> str:
+def get_path_from_metadata(file_id: str, metadata: dict[str, JSON]) -> str:
     filename = get(metadata, "filename", str)
     if filename is None:
         extension = ".txt"
@@ -237,7 +237,7 @@ async def async_main():
                 print("No files specified to upload.")
                 return
 
-            upload_tasks: list[asyncio.Task[JSON]] = []
+            upload_tasks: list[asyncio.Task[dict[str, JSON]]] = []
             async with asyncio.TaskGroup() as tg:
                 for file_path in args.files:
                     if not os.path.isfile(file_path):

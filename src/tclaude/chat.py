@@ -339,11 +339,10 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             finally:
                 stream_task = None
 
-            new_uploaded_files = common.get_uploaded_files(response.messages)
-
             session.history.extend(response.messages)
             session.total_tokens += response.tokens
 
+            new_uploaded_files = common.get_uploaded_files(response.messages)
             if new_uploaded_files:
                 session.uploaded_files.update(new_uploaded_files)
                 file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))

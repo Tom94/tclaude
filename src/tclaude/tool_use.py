@@ -21,13 +21,15 @@ import asyncio
 import importlib
 import inspect
 import logging
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Coroutine
 from types import UnionType
 from typing import Any, Callable, Literal, get_args, get_origin
 
+import aiohttp
 import docstring_parser
 
 from .common import History
+from .files import upload_file_base64
 from .json import JSON, get, get_or, get_or_default
 from .tools import ToolContentBase64Image, ToolContentText, ToolResult
 
@@ -173,13 +175,45 @@ def get_python_tools() -> tuple[AvailableTools, list[JSON]]:
     return available_tools, tool_definitions
 
 
-async def use_tools(available_tools: AvailableTools, messages: History) -> dict[str, JSON]:
+async def use_tool(client: aiohttp.ClientSession, tool_future: Awaitable[ToolResult]) -> tuple[list[dict[str, JSON]], bool]:
+    result = await tool_future
+    content: list[dict[str, JSON]] = []
+    for c in result.content:
+        if isinstance(c, ToolContentText):
+            content.append({"type": "text", "text": c.text})
+        elif isinstance(c, ToolContentBase64Image):  # pyright: ignore[reportUnnecessaryIsInstance]
+            import mimetypes
+
+            block: dict[str, JSON]
+            try:
+                extension = mimetypes.guess_extension(c.type) or ""
+                if not extension:
+                    raise RuntimeError(f"Could not determine file extension for media type {c.type}.")
+
+                filename = f"{id}_{len(content)}{extension}"
+
+                metadata = await upload_file_base64(client, filename, c.data, c.type, None)
+                if "id" not in metadata:
+                    raise RuntimeError(f"Tool result image upload failed: {metadata}")
+
+                block = {"type": "image", "source": {"type": "file", "file_id": metadata["id"]}}
+            except Exception as e:
+                logger.error(f"Failed to upload tool result image. Passing image inline. {e}")
+                block = {"type": "image", "source": {"type": "base64", "data": c.data, "media_type": c.type}}
+
+            content.append(block)
+        else:
+            logger.warning(f"Unexpected content type in tool result: {c}")
+
+    return content, result.is_error
+
+
+async def use_tools(client: aiohttp.ClientSession, available_tools: AvailableTools, messages: History) -> dict[str, JSON]:
     """
     Use the tools specified in the messages to perform actions.
     This function is called when the model indicates that it wants to use a tool.
     """
     tool_results: list[dict[str, JSON]] = []
-    tool_tasks: list[asyncio.Task[ToolResult] | None] = []
 
     # Find the last assistant message with tool use
     last_message = messages[-1] if messages else None
@@ -187,43 +221,29 @@ async def use_tools(available_tools: AvailableTools, messages: History) -> dict[
         return {"role": "user", "content": tool_results}
 
     # Process each content block that contains tool use. Tools are run in parallel.
-    for content_block in get_or_default(last_message, "content", list[JSON]):
-        if get(content_block, "type", str) == "tool_use":
-            tool_name = get(content_block, "name", str)
-            tool_input = get_or(content_block, "input", {})
-            tool_use_id = get(content_block, "id", str)
+    async with asyncio.TaskGroup() as tg:
+        for content_block in get_or_default(last_message, "content", list[JSON]):
+            if get(content_block, "type", str) == "tool_use":
+                tool_name = get(content_block, "name", str)
+                tool_input = get_or(content_block, "input", {})
+                tool_use_id = get(content_block, "id", str)
 
-            if tool_name and tool_name in available_tools:
-                # Call the tool function with the provided input
-                tool_fun = available_tools[tool_name]
-                tool_use_task = asyncio.create_task(tool_fun(**tool_input))
-                tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id})
-                tool_tasks.append(tool_use_task)
-            else:
-                tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True})
-                tool_tasks.append(None)
+                if tool_name and tool_name in available_tools:
 
-    # Wait for all async tool calls to complete
-    for tool_result, task in zip(tool_results, tool_tasks):
-        if task is None:
-            continue
+                    async def tool_use_wrapper(name: str, input: dict[str, Any], result: dict[str, JSON]) -> None:
+                        try:
+                            tool_fun = available_tools[name]
+                            result["content"], result["is_error"] = await use_tool(client, tool_fun(**input))
+                        except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
+                            if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
+                                result["content"] = "Tool execution was cancelled."
+                            else:
+                                result["content"] = f"Error executing tool: {str(e)}"
+                            result["is_error"] = True
 
-        try:
-            result = await task
-            content: list[dict[str, JSON]] = []
-            for c in result.content:
-                if isinstance(c, ToolContentText):
-                    content.append({"type": "text", "text": c.text})
-                elif isinstance(c, ToolContentBase64Image):  # pyright: ignore[reportUnnecessaryIsInstance]
-                    content.append({"type": "image", "source": {"type": "base64", "data": c.data, "media_type": c.type}})
-
-            tool_result["content"] = content
-            tool_result["is_error"] = result.is_error
-        except (KeyboardInterrupt, asyncio.CancelledError, Exception) as e:
-            if isinstance(e, (KeyboardInterrupt, asyncio.CancelledError)):
-                tool_result["content"] = "Tool execution was cancelled."
-            else:
-                tool_result["content"] = f"Error executing tool: {str(e)}"
-            tool_result["is_error"] = True
+                    tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id})
+                    _ = tg.create_task(tool_use_wrapper(tool_name, tool_input, tool_results[-1]))
+                else:
+                    tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": f"Tool {tool_name} not found", "is_error": True})
 
     return {"role": "user", "content": tool_results}

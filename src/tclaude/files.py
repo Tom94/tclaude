@@ -73,16 +73,29 @@ async def rm_file(session: aiohttp.ClientSession, file_id: str) -> JSON:
 
 
 async def upload_file(session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
+    async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
+        file_data = await file.read()
+
+    mime_type, content_encoding = mimetypes.guess_file_type(file_path)
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+
+    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+
+
+async def upload_file_base64(
+    session: aiohttp.ClientSession, file_path: str, file_data_base64: str, mime_type: str, content_encoding: str | None
+) -> dict[str, JSON]:
+    import base64
+
+    file_data = base64.b64decode(file_data_base64)
+    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+
+
+async def upload_file_mem(session: aiohttp.ClientSession, file_path: str, file_data: bytes, mime_type: str, content_encoding: str | None) -> dict[str, JSON]:
     url, headers = endpoints.get_files_endpoint_anthropic()
 
     try:
-        async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
-            file_data = await file.read()
-
-        mime_type, content_encoding = mimetypes.guess_file_type(file_path)
-        if mime_type is None:
-            mime_type = "application/octet-stream"
-
         if content_encoding is not None:
             headers["Content-Encoding"] = content_encoding
 

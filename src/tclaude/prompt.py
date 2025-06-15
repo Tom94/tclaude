@@ -275,9 +275,12 @@ async def stream_response(
         call_again = True
     elif stop_reason == "tool_use":
         call_again = True
-        messages.append(await tool_use.use_tools(external_tools_available or {}, messages))
+        messages.append(await tool_use.use_tools(session, external_tools_available or {}, messages))
     else:
         call_again = False
+
+    if on_response_update is not None:
+        on_response_update(Response(messages=messages, tokens=tokens, call_again=False))
 
     return Response(
         messages=messages,

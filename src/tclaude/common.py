@@ -170,8 +170,13 @@ def get_uploaded_files(messages: History) -> dict[str, dict[str, JSON]]:
                 }:
                     # This removes the _input_pending flag if it exists, which is intended because this user message *is* the input.
                     uploaded_files[file_id] = {}
-                case {"type": "tool_result"}:
-                    # TODO: Handle tool results that involve image uploads
+                case {"type": "tool_result", "content": list(tool_content)}:
+                    for c in tool_content:
+                        match c:
+                            case {"type": "image", "source": {"file_id": str(file_id)}}:
+                                uploaded_files[file_id] = {}
+                            case _:
+                                pass
                     pass
                 case {"type": "code_execution_tool_result", "content": {"type": "code_execution_result", "content": list(code_exec_content)}}:
                     for c in code_exec_content:

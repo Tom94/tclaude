@@ -170,6 +170,8 @@ def write_tool_result(tool_use: JSON, tool_result: JSON, io: StringIO, pretty: b
                 match content_block:
                     case {"type": "text", "text": str(text)}:
                         _ = result_io.write(text)
+                    case {"type": "image", "source": {"file_id": str(file_id)}}:
+                        _ = result_io.write(f"![image]({file_id})")
                     case _:
                         _ = result_io.write(json.dumps(content_block, indent=2, sort_keys=True))
 

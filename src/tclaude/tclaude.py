@@ -41,7 +41,7 @@ def read_user_input(input: list[str]) -> str:
 
 async def fzf_sessions(sessions_dir: str) -> str:
     # Find session files in the sessions directory
-    session_files = [f for f in os.listdir(sessions_dir) if os.path.isfile(os.path.join(sessions_dir, f)) and f.endswith(".json")]
+    session_files = sorted((f for f in os.listdir(sessions_dir) if os.path.isfile(os.path.join(sessions_dir, f)) and f.endswith(".json")), reverse=True)
 
     try:
         opts = ["--preview", "tclaude -p -s {}"]
@@ -51,7 +51,7 @@ async def fzf_sessions(sessions_dir: str) -> str:
             opts.extend(
                 [
                     "--color=hl:12,hl+:12,prompt:5,query:7,pointer:5,info:244,spinner:5,header:7,marker:12",
-                    '--bind=ctrl-d:preview-down,ctrl-u:preview-up',
+                    "--bind=ctrl-d:preview-down,ctrl-u:preview-up",
                     "--prompt= ",
                     "--preview-window=60%",
                     "--height=40%",

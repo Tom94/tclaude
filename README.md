@@ -58,7 +58,7 @@ tclaude "What is the state of the art in physically based rendering?"
 
 Once you're done chatting, the session will be automatically named and saved as `<session-name>.json` in the working directory.
 
-You can resume the session with `tclaude -s <session-name>.json`.
+You can resume the session with `tclaude -s <session-name>.json` or browse past sessions with fuzzy finding via `tclaude -s`.
 
 Customize where sessions are saved by passing `--sessions-dir <dir>` or by setting the `TCLAUDE_SESSIONS_DIR` environment variable.
 

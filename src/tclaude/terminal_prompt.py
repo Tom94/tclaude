@@ -14,15 +14,28 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import asyncio
-from typing import Callable
+from collections.abc import Awaitable, Iterable
+import inspect
+from typing import Callable, cast, override
 
 from prompt_toolkit import ANSI, PromptSession
+from prompt_toolkit.completion import (
+    CompleteEvent,
+    Completer,
+    Completion,
+    WordCompleter,
+)
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
+from prompt_toolkit.document import Document
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from . import common, logging_config
+from .commands import Command, CommandCallback, get_commands
+from .session import ChatSession
 from .spinner import SPINNER_FPS
 
 
@@ -43,6 +56,12 @@ def create_prompt_key_bindings():
 
     @bindings.add("enter")
     def _(event: KeyPressEvent):
+        complete_state = event.app.current_buffer.complete_state
+        if complete_state is not None and complete_state.current_completion is not None:
+            event.app.current_buffer.apply_completion(complete_state.current_completion)
+            event.app.current_buffer.insert_text(" ")
+            return
+
         if not event.app.current_buffer.text:
             # Hide placeholder text when the user presses enter.
             event.app.current_buffer.text = " "
@@ -54,19 +73,82 @@ def create_prompt_key_bindings():
 
     @bindings.add("c-p")
     def _(event: KeyPressEvent):
+        if event.app.current_buffer.complete_state is not None:
+            event.app.current_buffer.complete_previous()
+            return
+
         event.app.current_buffer.history_backward()
 
     @bindings.add("c-n")
     def _(event: KeyPressEvent):
+        if event.app.current_buffer.complete_state is not None:
+            event.app.current_buffer.complete_next()
+            return
+
         event.app.current_buffer.history_forward()
 
     return bindings
+
+
+class CommandCompleter(Completer):
+    def __init__(self, options: dict[str, Completer | CommandCallback], ignore_case: bool = True) -> None:
+        self.options: dict[str, Completer | CommandCallback] = options
+        self.ignore_case: bool = ignore_case
+
+    @override
+    def __repr__(self) -> str:
+        return f"CommandCompleter({self.options!r}, ignore_case={self.ignore_case!r})"
+
+    @classmethod
+    def from_nested_dict(cls, data: dict[str, Command]) -> CommandCompleter:
+        options: dict[str, Completer | CommandCallback] = {}
+        for key, value in data.items():
+            if isinstance(value, Completer):
+                options[key] = value
+            elif isinstance(value, dict):
+                options[key] = cls.from_nested_dict(value)
+            else:
+                assert inspect.iscoroutinefunction(value)
+                options[key] = cast(CommandCallback, value)
+
+        return cls(options)
+
+    @override
+    def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+        # Split document.
+        text = document.text_before_cursor.lstrip()
+        stripped_len = len(document.text_before_cursor) - len(text)
+
+        # If there is a space, check for the first term, and use a
+        # subcompleter.
+        if " " in text:
+            terms = text.split(" ")
+            first_term = terms[0] if terms else ""
+            completer = self.options.get(first_term)
+
+            # If we have a sub completer, use this for the completions.
+            if isinstance(completer, Completer):
+                remaining_text = text[len(first_term) :].lstrip()
+                move_cursor = len(text) - len(remaining_text) + stripped_len
+
+                new_document = Document(
+                    remaining_text,
+                    cursor_position=document.cursor_position - move_cursor,
+                )
+
+                yield from completer.get_completions(new_document, complete_event)
+
+        # No space in the input: behave exactly like `WordCompleter`.
+        else:
+            completer = WordCompleter(list(self.options.keys()), ignore_case=self.ignore_case, sentence=True, match_middle=True)
+            yield from completer.get_completions(document, complete_event)
 
 
 async def terminal_prompt(
     lprompt: Callable[[str], str],
     rprompt: Callable[[str], str],
     prompt_session: PromptSession[str],
+    session: ChatSession,
     user_input: str = "",
 ) -> str:
     key_bindings = create_prompt_key_bindings()
@@ -91,6 +173,9 @@ async def terminal_prompt(
             prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
             prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
 
+    commands = get_commands(session.uploaded_files)
+    completer = CommandCompleter.from_nested_dict(commands)
+
     animate_task = asyncio.create_task(animate_prompts())
     try:
         with patch_stdout(raw=True):
@@ -108,6 +193,7 @@ async def terminal_prompt(
                 handle_sigint=False,
                 default=user_input,
                 accept_default=user_input != "",
+                completer=completer,
             )
     finally:
         _ = animate_task.cancel()

@@ -15,12 +15,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
-from functools import partial
 import json
 import logging
 import os
 import signal
 from contextlib import AsyncExitStack
+from functools import partial
 from itertools import chain
 
 import aiohttp
@@ -28,7 +28,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.input import create_input
 from prompt_toolkit.output import create_output
 
-from . import common
+from . import commands, common
 from .common import History, is_valid_metadata
 from .config import TClaudeArgs, load_system_prompt
 from .json import JSON, get_or
@@ -248,12 +248,24 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
         while True:
             if is_user_turn:
                 try:
-                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session, user_input)
+                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session, session, user_input)
                 except EOFError:
                     break
                 except KeyboardInterrupt:
                     continue
                 if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    try:
+                        cb = commands.get_callback(user_input.rstrip(), commands.get_commands(session.uploaded_files))
+                        async with live_print(lambda _: f"Executing '{user_input}' {spinner()}"):
+                            await cb()
+                    except ValueError as e:
+                        logger.error(f"Invalid command '{user_input}': {e}")
+                    except EOFError:
+                        break
+                    user_input = ""
                     continue
 
                 if file_upload_verification_task:

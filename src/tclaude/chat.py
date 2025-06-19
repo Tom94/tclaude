@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
+from functools import partial
 import json
 import logging
 import os
@@ -184,9 +185,11 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             )
 
         # Print the current state of the response. Keep overwriting the same lines since the response is getting incrementally built.
-        async def history_or_spinner(messages: History):
-            current_message = await pretty_history_to_string(messages, skip_user_text=True)
-            return current_message if current_message else f"{spinner()} "
+        async def history_or_spinner(response: Response, final: bool):
+            current_message = await pretty_history_to_string(response.messages, skip_user_text=True)
+            if not final:
+                current_message = current_message if current_message else f"{spinner()} "
+            return current_message
 
         def lprompt(prefix: str) -> str:
             return f"{prefix}{common.CHEVRON} "
@@ -254,10 +257,10 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                     continue
 
                 if file_upload_verification_task:
-                    async with live_print(lambda: f"Verifying uploaded files {spinner()}"):
+                    async with live_print(lambda _: f"Verifying uploaded files {spinner()}"):
                         await file_upload_verification_task
 
-                async with live_print(lambda: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
+                async with live_print(lambda _: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
                     _ = await gather_file_uploads(file_upload_tasks)
                 file_upload_tasks.clear()
 
@@ -293,13 +296,10 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
 
                 logger.info(f"write_cache={write_cache}")
 
-            partial: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
-
-            async def partial_history_or_spinner() -> str:
-                return await history_or_spinner(partial.messages)
+            partial_response: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
 
             try:
-                async with live_print(partial_history_or_spinner, transient=False):
+                async with live_print(partial(history_or_spinner, partial_response), transient=False):
                     stream_task = asyncio.create_task(
                         stream_response(
                             session=client,
@@ -315,7 +315,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                             enable_thinking=args.thinking,
                             thinking_budget=args.thinking_budget,
                             write_cache=write_cache,
-                            on_response_update=lambda r: partial.__setattr__("messages", r.messages),
+                            on_response_update=lambda r: partial_response.__setattr__("messages", r.messages),
                         )
                     )
 

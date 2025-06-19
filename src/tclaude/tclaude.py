@@ -21,7 +21,7 @@ import sys
 
 from . import common, logging_config
 from .config import load_config, parse_tclaude_args
-from .print import history_to_string, print_decoy_prompt
+from .print import history_to_string
 
 logger = logging.getLogger(__package__)
 
@@ -122,7 +122,7 @@ async def async_main():
     # We print a decoy prompt to reduce the perceived startup delay. Importing .chat takes as much as hundreds of milliseconds (!), so we
     # want to show the user something immediately.
     if not user_input:
-        print_decoy_prompt("", wrap_width)
+        common.print_decoy_prompt("", wrap_width)
 
     from . import chat
 

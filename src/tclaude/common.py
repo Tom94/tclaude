@@ -37,6 +37,10 @@ def ansi(cmd: str) -> str:
     return f"\033[{cmd}"
 
 
+ANSI_HIDE_CURSOR = ansi("?25l")
+ANSI_SHOW_CURSOR = ansi("?25h")
+ANSI_BEAM_CURSOR = ansi("6 q")
+
 ANSI_MID_GRAY = ansi("0;38;5;245m")
 ANSI_BOLD_YELLOW = ansi("1;33m")
 ANSI_BOLD_PURPLE = ansi("1;35m")
@@ -44,6 +48,20 @@ ANSI_BOLD_CYAN = ansi("1;36m")
 ANSI_BOLD_BRIGHT_RED = ansi("1;91m")
 ANSI_RESET = ansi("0m")
 ANSI_BEGINNING_OF_LINE = ansi("1G")
+
+
+def print_decoy_prompt(user_input: str, wrap_width: int):
+    """
+    Reproduce the initial prompt that prompt_toolkit will produce. Requires a bit of bespoke formatting to match exactly.
+    """
+    if user_input:
+        print(f"{prompt_style(CHEVRON)} {user_input}")
+        return
+
+    initial_prompt = char_wrap(f"  {HELP_TEXT}", wrap_width - 2)
+    num_newlines = initial_prompt.count("\n")
+    ansi_return: str = "\033[F" * num_newlines + ansi("3G")
+    print(f"{prompt_style(CHEVRON)} {gray_style(initial_prompt[2:])}{ansi_return}", end="", flush=True)
 
 
 def get_wrap_width() -> int:

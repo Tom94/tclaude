@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from typing import Callable, TextIO, cast
 
+from .common import ANSI_HIDE_CURSOR, ANSI_SHOW_CURSOR
 from .spinner import SPINNER_FPS
 
 
@@ -36,7 +37,7 @@ def nth_rfind(string: str, char: str, n: int) -> int:
 
 
 @asynccontextmanager
-async def live_print(get_live_text: Callable[[], str] | Callable[[], Awaitable[str]], transient: bool = True):
+async def live_print(get_live_text: Callable[[bool], str] | Callable[[bool], Awaitable[str]], transient: bool = True):
     original_stdout: TextIO = sys.stdout
     with StringIO() as stdout, redirect_stdout(stdout), redirect_stderr(stdout):
         num_newlines_printed = 0
@@ -45,6 +46,7 @@ async def live_print(get_live_text: Callable[[], str] | Callable[[], Awaitable[s
             nonlocal num_newlines_printed
 
             to_print = StringIO()
+            _ = to_print.write(ANSI_SHOW_CURSOR if final else ANSI_HIDE_CURSOR)
 
             # Move the cursor up by the number of newlines printed so far, then clear the screen from the cursor down
             if num_newlines_printed > 0:
@@ -59,9 +61,9 @@ async def live_print(get_live_text: Callable[[], str] | Callable[[], Awaitable[s
             term_height = os.get_terminal_size().lines
 
             if inspect.iscoroutinefunction(get_live_text):
-                text = cast(str, await get_live_text())
+                text = cast(str, await get_live_text(final))
             else:
-                text = cast(str, get_live_text())
+                text = cast(str, get_live_text(final))
 
             if not stdout.tell() == 0:
                 text = f"{text}\n\n{stdout.getvalue().rstrip()}"

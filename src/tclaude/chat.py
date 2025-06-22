@@ -271,6 +271,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 if file_upload_verification_task:
                     async with live_print(lambda _: f"Verifying uploaded files {spinner()}"):
                         await file_upload_verification_task
+                    file_upload_verification_task = None
 
                 async with live_print(lambda _: f"[{sum(1 for t in file_upload_tasks if t.done())}/{len(file_upload_tasks)}] files uploaded {spinner()}"):
                     _ = await gather_file_uploads(file_upload_tasks)
@@ -356,6 +357,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
 
             new_uploaded_files = common.get_uploaded_files(response.messages)
             if new_uploaded_files:
+                assert file_upload_verification_task is None, "File upload verification task should not be running when we have new uploaded files"
                 session.uploaded_files.update(new_uploaded_files)
                 file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))
 

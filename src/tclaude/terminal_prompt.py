@@ -140,7 +140,7 @@ class CommandCompleter(Completer):
 
         # No space in the input: behave exactly like `WordCompleter`.
         else:
-            completer = WordCompleter(list(self.options.keys()), ignore_case=self.ignore_case, sentence=True, match_middle=True)
+            completer = WordCompleter(list(self.options.keys()), ignore_case=self.ignore_case, sentence=True)
             yield from completer.get_completions(document, complete_event)
 
 

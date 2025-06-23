@@ -121,7 +121,7 @@ class ChatSession:
             for metadata in downloadable_files:
                 match metadata:
                     case {"id": str(file_id), "filename": str(file_name), "size_bytes": int(num_bytes)}:
-                        logger.info(f"- {file_name}, {naturalsize(num_bytes)} ({file_id})")
+                        logger.info(f"- {file_name}, {naturalsize(num_bytes)} (id={file_id})")
                     case _:
                         logger.warning(f"Unexpected metadata format for downloadable file: {metadata}")
 

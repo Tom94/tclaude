@@ -262,7 +262,7 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                         async with live_print(lambda _: f"Executing '{user_input}' {spinner()}"):
                             await cb()
                     except ValueError as e:
-                        logger.error(f"Invalid command '{user_input}': {e}")
+                        logger.error(f"Could not execute {user_input}: {e}")
                     except EOFError:
                         break
                     user_input = ""

@@ -53,6 +53,7 @@ def get_commands(
     result: dict[str, Command] = {
         "/help": print_help,
         "/exit": exit,
+        "/download": {},
     }
 
     if uploaded_files:
@@ -71,12 +72,12 @@ def get_callback(command: str, commands: Command) -> CommandCallback:
     callback = commands
     for p in parts:
         if not isinstance(callback, Mapping):
-            raise ValueError(f"Extra part '{p}'")
+            raise ValueError(f"invalid argument '{p}'")
         if p not in callback:
-            raise ValueError(f"Unknown '{p}'")
+            raise ValueError(f"unknown '{p}'")
         callback = callback[p]
 
     if isinstance(callback, Mapping):
-        raise ValueError("Command is incomplete")
+        raise ValueError("missing argument")
 
     return callback

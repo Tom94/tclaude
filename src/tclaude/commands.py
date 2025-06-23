@@ -14,16 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import sys
 from collections.abc import Awaitable, Mapping
 from functools import partial
 from io import StringIO
-import sys
 from typing import Callable, TypeAlias
 
 import aiohttp
 
-from . import files, common
-from .json import JSON, get_or
+from . import common, files
+from .json import get_or
 
 CommandCallback: TypeAlias = Callable[[], Awaitable[None]]
 Command: TypeAlias = Mapping[str, "Command"] | CommandCallback
@@ -47,9 +47,7 @@ async def download_file(file_id: str, file_path: str):
         await files.download_file(client, file_id, file_path)
 
 
-def get_commands(
-    uploaded_files: dict[str, dict[str, JSON]],
-) -> dict[str, Command]:
+def get_commands(uploaded_files: dict[str, files.FileMetadata]) -> dict[str, Command]:
     result: dict[str, Command] = {
         "/help": print_help,
         "/exit": exit,
@@ -59,6 +57,8 @@ def get_commands(
     if uploaded_files:
         file_commands: dict[str, Command] = {}
         for id, metadata in uploaded_files.items():
+            if not metadata.get("downloadable", False):
+                continue
             filename = get_or(metadata, "filename", "<unknown>")
             file_commands[filename] = partial(download_file, id, filename)
 

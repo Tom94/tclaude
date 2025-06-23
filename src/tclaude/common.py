@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, TypeAlias, cast
 
+from .files import FileMetadata
 from .json import JSON, get, get_or_default, of_type_or_none
 
 logger = logging.getLogger(__package__)
@@ -155,11 +156,11 @@ def is_valid_metadata(metadata: dict[str, JSON]) -> bool:
     return get(metadata, "id", str) is not None
 
 
-def get_uploaded_files(messages: History) -> dict[str, dict[str, JSON]]:
+def get_uploaded_files(messages: History) -> dict[str, FileMetadata]:
     """
     Extract uploaded files from history.
     """
-    uploaded_files: dict[str, dict[str, JSON]] = {}
+    uploaded_files: dict[str, FileMetadata] = {}
 
     for message in messages:
         for content_block in get_or_default(message, "content", list[JSON]):

@@ -27,6 +27,7 @@ from humanize import naturalsize
 
 from . import common
 from .common import History, ansi, escape, wrap_style
+from .files import FileMetadata
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
 
@@ -237,7 +238,7 @@ def write_user_message(
     pretty: bool,
     wrap_width: int,
     skip_user_text: bool,
-    uploaded_files: dict[str, dict[str, JSON]] | None,
+    uploaded_files: dict[str, FileMetadata] | None,
     text_only: bool,
 ):
     prompt = f"{common.CHEVRON} "
@@ -407,7 +408,7 @@ async def history_to_string(
     pretty: bool,
     wrap_width: int = 0,
     skip_user_text: bool = False,
-    uploaded_files: dict[str, dict[str, JSON]] | None = None,
+    uploaded_files: dict[str, FileMetadata] | None = None,
     text_only: bool = False,
 ) -> str:
     tool_results = gather_tool_results(history)

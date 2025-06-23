@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Iterable
+from collections.abc import Iterable
 import inspect
 from typing import Callable, cast, override
 
@@ -33,10 +33,10 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.shortcuts import CompleteStyle
 
 from . import common, logging_config
 from .commands import Command, CommandCallback, get_commands
+from .files import FileMetadata
 from .session import ChatSession
 from .spinner import SPINNER_FPS
 
@@ -175,28 +175,30 @@ async def terminal_prompt(
             prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
             prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
 
-    completer = CommandCompleter.from_nested_dict(get_commands(session.uploaded_files))
+    def on_files_changed(files: dict[str, FileMetadata]):
+        prompt_session.completer = CommandCompleter.from_nested_dict(get_commands(files))
 
     animate_task = asyncio.create_task(animate_prompts())
     try:
-        with patch_stdout(raw=True):
-            user_input = await prompt_session.prompt_async(
-                ANSI(common.prompt_style(lprompt(prefix))),
-                rprompt=ANSI(common.prompt_style(rprompt(prefix))),
-                vi_mode=True,
-                cursor=ModalCursorShapeConfig(),
-                multiline=True,
-                wrap_lines=True,
-                prompt_continuation=ANSI(f"{common.prompt_style(common.CHEVRON_CONTINUATION)} "),
-                placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
-                key_bindings=key_bindings,
-                refresh_interval=1 / SPINNER_FPS,
-                handle_sigint=False,
-                default=user_input,
-                accept_default=user_input != "",
-                completer=completer,
-                complete_while_typing=Condition(lambda: prompt_session.app.current_buffer.text.startswith("/")),
-            )
+        async with session.on_files_changed.temp_subscribe(on_files_changed):
+            with patch_stdout(raw=True):
+                user_input = await prompt_session.prompt_async(
+                    ANSI(common.prompt_style(lprompt(prefix))),
+                    rprompt=ANSI(common.prompt_style(rprompt(prefix))),
+                    vi_mode=True,
+                    cursor=ModalCursorShapeConfig(),
+                    multiline=True,
+                    wrap_lines=True,
+                    prompt_continuation=ANSI(f"{common.prompt_style(common.CHEVRON_CONTINUATION)} "),
+                    placeholder=ANSI(common.gray_style(common.HELP_TEXT)),
+                    key_bindings=key_bindings,
+                    refresh_interval=1 / SPINNER_FPS,
+                    handle_sigint=False,
+                    default=user_input,
+                    accept_default=user_input != "",
+                    completer=CommandCompleter.from_nested_dict(get_commands(session.uploaded_files)),
+                    complete_while_typing=Condition(lambda: prompt_session.app.current_buffer.text.startswith("/")),
+                )
     finally:
         _ = animate_task.cancel()
         try:

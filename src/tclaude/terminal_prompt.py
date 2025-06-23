@@ -30,8 +30,10 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.cursor_shapes import ModalCursorShapeConfig
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.shortcuts import CompleteStyle
 
 from . import common, logging_config
 from .commands import Command, CommandCallback, get_commands
@@ -173,8 +175,7 @@ async def terminal_prompt(
             prompt_session.message = ANSI(common.prompt_style(lprompt(prefix)))
             prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
 
-    commands = get_commands(session.uploaded_files)
-    completer = CommandCompleter.from_nested_dict(commands)
+    completer = CommandCompleter.from_nested_dict(get_commands(session.uploaded_files))
 
     animate_task = asyncio.create_task(animate_prompts())
     try:
@@ -194,6 +195,7 @@ async def terminal_prompt(
                 default=user_input,
                 accept_default=user_input != "",
                 completer=completer,
+                complete_while_typing=Condition(lambda: prompt_session.app.current_buffer.text.startswith("/")),
             )
     finally:
         _ = animate_task.cancel()

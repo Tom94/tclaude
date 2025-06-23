@@ -71,6 +71,10 @@ tclaude --thinking "Write a quine in C++."
 > [Claude thinks about how to write a quine before responding.]
 ```
 
+### Commands
+
+Several commands are available to do other things than chatting with Claude, such as `/download` to download files previously created by Claude. Use `/help` to see a list of available commands.
+
 ### Custom system prompt
 
 If you'd like to customize the behavior of Claude (e.g. tell it to be brief, or give it background information), create `~/.configs/tclaude/roles/default.md`.

@@ -20,13 +20,16 @@ import json
 import mimetypes
 import os
 from collections.abc import Mapping
-from typing import cast
+from typing import TypeAlias, cast
 
 import aiofiles
 import aiohttp
 
 from . import endpoints
 from .json import JSON, get, get_or
+
+
+FileMetadata: TypeAlias = dict[str, JSON]
 
 MAX_FILE_LIST = 1000
 
@@ -72,17 +75,30 @@ async def rm_file(session: aiohttp.ClientSession, file_id: str) -> JSON:
     return data
 
 
-async def upload_file(session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
+async def upload_file(session: aiohttp.ClientSession, file_path: str) -> FileMetadata:
+    async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
+        file_data = await file.read()
+
+    mime_type, content_encoding = mimetypes.guess_file_type(file_path)
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+
+    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+
+
+async def upload_file_base64(
+    session: aiohttp.ClientSession, file_path: str, file_data_base64: str, mime_type: str, content_encoding: str | None
+) -> FileMetadata:
+    import base64
+
+    file_data = base64.b64decode(file_data_base64)
+    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+
+
+async def upload_file_mem(session: aiohttp.ClientSession, file_path: str, file_data: bytes, mime_type: str, content_encoding: str | None) -> FileMetadata:
     url, headers = endpoints.get_files_endpoint_anthropic()
 
     try:
-        async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
-            file_data = await file.read()
-
-        mime_type, content_encoding = mimetypes.guess_file_type(file_path)
-        if mime_type is None:
-            mime_type = "application/octet-stream"
-
         if content_encoding is not None:
             headers["Content-Encoding"] = content_encoding
 
@@ -91,9 +107,9 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> dict[st
 
         async with session.post(url, headers=headers, data=form_data) as response:
             response.raise_for_status()
-            data = cast(dict[str, JSON], await response.json())
+            data = cast(FileMetadata, await response.json())
     except aiohttp.ClientResponseError as e:
-        data: dict[str, JSON] = {
+        data: FileMetadata = {
             "error": {
                 "message": f"Failed to upload file {file_path}: {e.message}",
                 "status": e.status,
@@ -103,21 +119,21 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> dict[st
     return data
 
 
-async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> dict[str, JSON]:
+async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> FileMetadata:
     url, headers = endpoints.get_files_endpoint_anthropic()
     url += f"/{file_id}"
 
     try:
         async with session.get(url, headers=headers) as response:
             response.raise_for_status()
-            data = cast(dict[str, JSON], await response.json())
+            data = cast(FileMetadata, await response.json())
     except aiohttp.ClientResponseError as e:
         raise FileNotFoundError(f"Failed to get metadata for file {file_id}: {e.message}") from e
 
     return data
 
 
-async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> dict[str, JSON] | None:
+async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> FileMetadata | None:
     """
     Get file metadata, returning None if the file does not exist.
     """
@@ -127,7 +143,7 @@ async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str
         return None
 
 
-def get_path_from_metadata(file_id: str, metadata: dict[str, JSON]) -> str:
+def get_path_from_metadata(file_id: str, metadata: FileMetadata) -> str:
     filename = get(metadata, "filename", str)
     if filename is None:
         extension = ".txt"
@@ -237,7 +253,7 @@ async def async_main():
                 print("No files specified to upload.")
                 return
 
-            upload_tasks: list[asyncio.Task[dict[str, JSON]]] = []
+            upload_tasks: list[asyncio.Task[FileMetadata]] = []
             async with asyncio.TaskGroup() as tg:
                 for file_path in args.files:
                     if not os.path.isfile(file_path):

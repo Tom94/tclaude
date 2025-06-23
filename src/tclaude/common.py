@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, TypeAlias, cast
 
+from .files import FileMetadata
 from .json import JSON, get, get_or_default, of_type_or_none
 
 logger = logging.getLogger(__package__)
@@ -30,7 +31,7 @@ History: TypeAlias = list[dict[str, JSON]]
 
 CHEVRON = ""
 CHEVRON_CONTINUATION = "·"
-HELP_TEXT = "Type your message and hit Enter. Ctrl-D to exit, ESC for Vi mode, \\-Enter for newline."
+HELP_TEXT = "Type your message and hit Enter. Ctrl-D to exit, ESC for Vi mode, \\-Enter for newline, /help for commands."
 
 
 def ansi(cmd: str) -> str:
@@ -155,11 +156,11 @@ def is_valid_metadata(metadata: dict[str, JSON]) -> bool:
     return get(metadata, "id", str) is not None
 
 
-def get_uploaded_files(messages: History) -> dict[str, dict[str, JSON]]:
+def get_uploaded_files(messages: History) -> dict[str, FileMetadata]:
     """
     Extract uploaded files from history.
     """
-    uploaded_files: dict[str, dict[str, JSON]] = {}
+    uploaded_files: dict[str, FileMetadata] = {}
 
     for message in messages:
         for content_block in get_or_default(message, "content", list[JSON]):
@@ -170,8 +171,13 @@ def get_uploaded_files(messages: History) -> dict[str, dict[str, JSON]]:
                 }:
                     # This removes the _input_pending flag if it exists, which is intended because this user message *is* the input.
                     uploaded_files[file_id] = {}
-                case {"type": "tool_result"}:
-                    # TODO: Handle tool results that involve image uploads
+                case {"type": "tool_result", "content": list(tool_content)}:
+                    for c in tool_content:
+                        match c:
+                            case {"type": "image", "source": {"file_id": str(file_id)}}:
+                                uploaded_files[file_id] = {}
+                            case _:
+                                pass
                     pass
                 case {"type": "code_execution_tool_result", "content": {"type": "code_execution_result", "content": list(code_exec_content)}}:
                     for c in code_exec_content:

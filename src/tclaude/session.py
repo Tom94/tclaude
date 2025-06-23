@@ -23,9 +23,11 @@ import os
 
 import aiofiles.os
 import aiohttp
+from humanize import naturalsize
 
 from . import common, files, prompt
 from .common import History, is_valid_metadata
+from .event import AsyncEventEmitter
 from .json import JSON, get, get_or_default
 from .print import history_to_string
 from .token_counter import TokenCounter
@@ -51,7 +53,11 @@ class ChatSession:
 
         # Extract metadata from the history, like info about files we previously uploaded and older user messages.
         self.user_messages: list[str] = common.get_user_messages(history)
-        self.uploaded_files: dict[str, dict[str, JSON]] = common.get_uploaded_files(history)
+        self.uploaded_files: dict[str, files.FileMetadata] = common.get_uploaded_files(history)
+
+        # Subscribable events, e.g. when files change or autonaming finishes
+        self.on_files_changed: AsyncEventEmitter[[dict[str, files.FileMetadata]]] = AsyncEventEmitter()
+        self.on_autoname_finished: AsyncEventEmitter[[str]] = AsyncEventEmitter()
 
     # -------------------------------------
     # File things
@@ -109,6 +115,18 @@ class ChatSession:
 
         self.erase_invalid_file_content_blocks()
 
+        downloadable_files = [m for m in self.uploaded_files.values() if is_valid_metadata(m) and m.get("downloadable")]
+        if downloadable_files:
+            logger.info("Downloadable files are available. Type `/download` to download them.")
+            for metadata in downloadable_files:
+                match metadata:
+                    case {"id": str(file_id), "filename": str(file_name), "size_bytes": int(num_bytes)}:
+                        logger.info(f"- {file_name}, {naturalsize(num_bytes)} ({file_id})")
+                    case _:
+                        logger.warning(f"Unexpected metadata format for downloadable file: {metadata}")
+
+        await self.on_files_changed.emit(self.uploaded_files)
+
     async def upload_file(self, client_session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
         if not await aiofiles.os.path.isfile(file_path):
             logger.error(f"File {file_path} does not exist or is not a file.")
@@ -120,6 +138,8 @@ class ChatSession:
             raise RuntimeError(f"Failed to upload file {file_path}. No file ID returned.")
 
         self.uploaded_files[file_id] = result
+
+        await self.on_files_changed.emit(self.uploaded_files)
         return result
 
     # -------------------------------------
@@ -156,6 +176,8 @@ class ChatSession:
         date = datetime.datetime.now().strftime("%Y-%m-%d")
         self.name = f"{date}-{session_name}"
         logger.info(f"[✓] Session named {self.name}")
+
+        await self.on_autoname_finished.emit(self.name)
 
     @property
     def is_autonaming(self) -> bool:

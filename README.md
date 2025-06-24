@@ -1,4 +1,4 @@
-# tclaude — Claude in the terminal
+# tclaude — Claude in the terminal &nbsp;&nbsp; ![](https://github.com/tom94/tclaude/workflows/CI/badge.svg)
 
 A complete implementation of Claude in the terminal.
 

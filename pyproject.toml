@@ -23,7 +23,7 @@ description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "GPL-3.0-only"}
+license = "GPL-3.0-only"
 dependencies = [
     "aiofiles",
     "aiohttp",

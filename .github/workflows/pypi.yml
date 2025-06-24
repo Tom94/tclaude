@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*' # only publish to PyPI on tag pushes starting with 'v'
+      - v[0-9]+.[0-9]+.[0-9]+
 
 # Largely follows the PyPi packaging guide from
 # https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/

@@ -39,6 +39,9 @@ dependencies = [
     "wcwidth",
 ]
 
+[project.urls]
+Repository = "https://github.com/Tom94/tclaude"
+
 [project.scripts]
 tclaude = "tclaude.tclaude:main"
 

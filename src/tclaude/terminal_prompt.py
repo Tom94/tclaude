@@ -17,8 +17,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
 import inspect
+from collections.abc import Iterable
 from typing import Callable, cast, override
 
 from prompt_toolkit import ANSI, PromptSession
@@ -36,7 +36,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from . import common, logging_config
 from .commands import Command, CommandCallback, get_commands
-from .files import FileMetadata
+from .common import FileMetadata
 from .session import ChatSession
 from .spinner import SPINNER_FPS
 

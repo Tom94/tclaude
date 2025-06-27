@@ -21,12 +21,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, TypeAlias, cast
 
-from .files import FileMetadata
 from .json import JSON, get, get_or_default, of_type_or_none
 
 logger = logging.getLogger(__package__)
 
 History: TypeAlias = list[dict[str, JSON]]
+FileMetadata: TypeAlias = dict[str, JSON]
 
 
 CHEVRON = ""

@@ -15,7 +15,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-import sys
 from collections.abc import Awaitable, Mapping
 from functools import partial
 from io import StringIO

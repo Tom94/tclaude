@@ -20,16 +20,15 @@ import json
 import mimetypes
 import os
 from collections.abc import Mapping
-from typing import TypeAlias, cast
+from typing import cast
 
 import aiofiles
 import aiohttp
 
 from . import endpoints
+from .common import FileMetadata
 from .json import JSON, get, get_or
 
-
-FileMetadata: TypeAlias = dict[str, JSON]
 
 MAX_FILE_LIST = 1000
 

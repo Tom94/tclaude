@@ -26,8 +26,7 @@ from urllib.parse import urlparse
 from humanize import naturalsize
 
 from . import common
-from .common import History, ansi, escape, wrap_style
-from .files import FileMetadata
+from .common import FileMetadata, History, ansi, escape, wrap_style
 from .json import JSON, get, get_or, get_or_default
 from .spinner import spinner
 

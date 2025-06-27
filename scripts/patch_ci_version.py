@@ -31,7 +31,7 @@ def get_current_version(init_file: str) -> str:
 def generate_ci_version(base_version: str) -> str:
     """Generate PEP 440 CI version with format: X.Y.Z.devYYYYMMDDHHMMSS+hash"""
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    git_hash = get_git_hash()
+    # git_hash = get_git_hash()
     # return f"{base_version}.dev{timestamp}+{git_hash}"
 
     # Local versions (+hash) are not allowed in published packages (even on testpypi), so we omit the suffix

@@ -155,9 +155,7 @@ class ChatSession:
                 model=self.model,
                 history=autoname_history,
                 max_tokens=30,
-                enable_web_search=False,
                 system_prompt=self.system_prompt,
-                enable_thinking=False,
             )
 
             self.total_tokens += response.tokens

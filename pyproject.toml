@@ -28,6 +28,7 @@ dependencies = [
     "aiofiles",
     "aiohttp",
     "beautifulsoup4",
+    "dataclasses-json",
     "docstring_parser",
     "html2text",
     "humanize",

@@ -30,7 +30,7 @@ from prompt_toolkit.output import create_output
 
 from . import commands, common
 from .common import History, is_valid_metadata
-from .config import TClaudeArgs, load_system_prompt
+from .config import TClaudeConfig, load_system_prompt
 from .json import JSON, get_or
 from .live_print import live_print
 from .mcp import setup_mcp
@@ -86,18 +86,18 @@ async def gather_file_uploads(tasks: list[asyncio.Task[dict[str, JSON]]]) -> lis
     return results
 
 
-async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str, print_text_only: bool):
+async def single_prompt(config: TClaudeConfig, history: History, user_input: str, print_text_only: bool):
     """
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
 
-    system_prompt = load_system_prompt(args.role) if args.role else None
+    system_prompt = load_system_prompt(config.role) if config.role else None
     session = ChatSession(
         history=history,
-        model=args.model,
+        model=config.model,
         system_prompt=system_prompt,
-        role=os.path.splitext(os.path.basename(args.role))[0] if args.role and system_prompt else None,
-        name=deduce_session_name(args.session) if args.session else None,
+        role=os.path.splitext(os.path.basename(config.role))[0] if config.role and system_prompt else None,
+        name=deduce_session_name(config.session) if config.session else None,
     )
 
     async with AsyncExitStack() as stack:
@@ -106,8 +106,8 @@ async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: His
         async with asyncio.TaskGroup() as tg:
             if session.uploaded_files:
                 _ = tg.create_task(session.verify_file_uploads(client_session))
-            file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in args.file]
-            mcp = await stack.enter_async_context(setup_mcp(client_session, config))
+            file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in config.files]
+            mcp = await stack.enter_async_context(setup_mcp(client_session, config.mcp))
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
         user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
@@ -125,15 +125,15 @@ async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: His
                 session=client_session,
                 model=session.model,
                 history=history,
-                max_tokens=args.max_tokens,
-                enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                max_tokens=config.max_tokens,
+                enable_web_search=config.web_search,  # Web search is enabled by default
+                enable_code_exec=config.code_execution,  # Code execution is enabled by default
                 external_tools_available=available_tools,
                 external_tool_definitions=tool_definitions,
                 mcp_remote_servers=await mcp.get_remote_server_descs(client_session),
                 system_prompt=system_prompt,
-                enable_thinking=args.thinking,
-                thinking_budget=args.thinking_budget,
+                enable_thinking=config.thinking,
+                thinking_budget=config.thinking_budget,
             )
 
             history.extend(response.messages)
@@ -146,27 +146,27 @@ async def single_prompt(args: TClaudeArgs, config: dict[str, JSON], history: His
         logger.error("Broken pipe. Response could not passed on to the next command in the pipeline.")
 
 
-async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, user_input: str):
+async def chat(config: TClaudeConfig, history: History, user_input: str):
     """
     Main function to get user input, and print Anthropic's response.
     """
 
-    system_prompt = load_system_prompt(args.role) if args.role else None
+    system_prompt = load_system_prompt(config.role) if config.role else None
     session = ChatSession(
         history=history,
-        model=args.model,
+        model=config.model,
         system_prompt=system_prompt,
-        role=os.path.splitext(os.path.basename(args.role))[0] if args.role and system_prompt else None,
-        name=deduce_session_name(args.session) if args.session else None,
+        role=os.path.splitext(os.path.basename(config.role))[0] if config.role and system_prompt else None,
+        name=deduce_session_name(config.session) if config.session else None,
     )
 
     async with AsyncExitStack() as stack:
         client = await stack.enter_async_context(aiohttp.ClientSession())
 
         file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
-        file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in args.file if f]
+        file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in config.files if f]
 
-        mcp = setup_mcp(client, config)
+        mcp = setup_mcp(client, config.mcp)
         mcp_setup = None if mcp.empty else await stack.enter_async_context(TaskAsyncContextManager(mcp))
 
         input = create_input(always_prefer_tty=True)
@@ -301,9 +301,9 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 tool_definitions.extend(mcp_tool_definitions)
 
             container = common.get_latest_container(session.history)
-            write_cache = should_cache(response.tokens, args.model) if response is not None else False
+            write_cache = should_cache(response.tokens, config.model) if response is not None else False
 
-            if args.verbose:
+            if config.verbose:
                 if container is not None:
                     logger.info(f"Reusing code execution container `{container.id}`")
 
@@ -316,17 +316,17 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                     stream_task = asyncio.create_task(
                         stream_response(
                             session=client,
-                            model=args.model,
+                            model=config.model,
                             history=session.history,
-                            max_tokens=args.max_tokens,
-                            enable_web_search=not args.no_web_search,  # Web search is enabled by default
-                            enable_code_exec=not args.no_code_execution,  # Code execution is enabled by default
+                            max_tokens=config.max_tokens,
+                            enable_web_search=config.web_search,  # Web search is enabled by default
+                            enable_code_exec=config.code_execution,  # Code execution is enabled by default
                             external_tools_available=available_tools,
                             external_tool_definitions=tool_definitions,
                             mcp_remote_servers=await mcp.get_remote_server_descs(client),
                             system_prompt=session.system_prompt,
-                            enable_thinking=args.thinking,
-                            thinking_budget=args.thinking_budget,
+                            enable_thinking=config.thinking,
+                            thinking_budget=config.thinking_budget,
                             write_cache=write_cache,
                             on_response_update=lambda r: partial_response.__setattr__("messages", r.messages),
                         )
@@ -358,9 +358,9 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
             session.uploaded_files.update(common.get_uploaded_files(response.messages))
 
             print("\n")
-            if args.verbose:
+            if config.verbose:
                 response.tokens.print_tokens()
-                response.tokens.print_cost(args.model)
+                response.tokens.print_cost(config.model)
 
             # If we're beginning the next user turn, let us spawn a few background tasks to finish processing responses received so far.
             if is_user_turn:
@@ -387,13 +387,13 @@ async def chat(args: TClaudeArgs, config: dict[str, JSON], history: History, use
                 session_path += ".json"
 
             if not os.path.isfile(session_path):
-                session_path = os.path.join(args.sessions_dir, session_path)
+                session_path = os.path.join(config.sessions_dir, session_path)
 
             with open(session_path, "w") as f:
                 json.dump(session.history, f, indent=2)
 
             logger.info(f"[✓] Saved session to {session_path}")
 
-    if args.verbose:
+    if config.verbose:
         session.total_tokens.print_tokens()
-        session.total_tokens.print_cost(args.model)
+        session.total_tokens.print_cost(config.model)

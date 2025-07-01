@@ -86,19 +86,21 @@ async def async_main():
         )
         sys.exit(1)
 
-    wrap_width = common.get_wrap_width()
-
     args = parse_tclaude_args()
-    logging_config.setup(verbose=args.verbose)
 
-    logger.debug(f"Logging setup complete: verbose={args.verbose}")
-
-    if args.session == "fzf":
-        args.session = await fzf_sessions(args.sessions_dir)
+    logging_config.setup(verbose=args.verbose is True)
 
     config = load_config(args.config)
+    config.apply_args_override(args)
 
-    history = common.load_session_if_exists(args.session, args.sessions_dir) if args.session else []
+    logger.debug(f"Logging setup complete: verbose={config.verbose}")
+
+    if config.session == "fzf":
+        config.session = await fzf_sessions(config.sessions_dir)
+
+    wrap_width = common.get_wrap_width()
+
+    history = common.load_session_if_exists(config.session, config.sessions_dir) if config.session else []
     if args.print_history:
         print(await history_to_string(history, pretty=True, wrap_width=wrap_width), flush=True)
         return
@@ -113,7 +115,7 @@ async def async_main():
 
         from . import chat
 
-        await chat.single_prompt(args, config, history, user_input, print_text_only=True)
+        await chat.single_prompt(config, history, user_input, print_text_only=True)
         return
 
     if history:
@@ -126,7 +128,7 @@ async def async_main():
 
     from . import chat
 
-    await chat.chat(args, config, history, user_input)
+    await chat.chat(config, history, user_input)
 
 
 def main():

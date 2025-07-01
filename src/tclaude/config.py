@@ -20,6 +20,11 @@ import logging
 import os
 import sys
 import tomllib
+from dataclasses import dataclass, field
+from typing import cast
+
+from dataclasses_json import Undefined, dataclass_json
+from dataclasses_json.undefined import UndefinedParameterError
 
 from .json import JSON
 
@@ -45,6 +50,14 @@ def default_sessions_dir() -> str:
     if "TCLAUDE_SESSIONS_DIR" in os.environ:
         return os.environ["TCLAUDE_SESSIONS_DIR"]
     return "."
+
+
+def default_role() -> str | None:
+    default_role = os.path.join(get_config_dir(), "roles", "default.md")
+    if not os.path.isfile(default_role):
+        default_role = None
+
+    return default_role
 
 
 def load_system_prompt(path: str) -> str | None:
@@ -83,26 +96,24 @@ class TClaudeArgs(argparse.Namespace):
     def __init__(self):
         super().__init__()
 
-        default_role = os.path.join(get_config_dir(), "roles", "default.md")
-        if not os.path.isfile(default_role):
-            default_role = None
-
         self.input: list[str]
 
         self.config: str = "tclaude.toml"
-        self.file: list[str] = []
-        self.max_tokens: int = 2**14  # 16k tokens
-        self.model: str = "claude-sonnet-4-0"
-        self.no_code_execution: bool = False
-        self.no_web_search: bool = False
-        self.print_history: bool = False
-        self.role: str | None = default_role
-        self.session: str | None = None
-        self.sessions_dir: str = default_sessions_dir()
-        self.thinking: bool = False
-        self.thinking_budget: int | None = None
-        self.verbose: bool = False
         self.version: bool = False
+        self.verbose: bool | None = None
+
+        # Configuration overrides (default values are set in TClaudeConfig)
+        self.file: list[str] = []
+        self.max_tokens: int | None = None
+        self.model: str | None = None
+        self.no_code_execution: bool | None = None
+        self.no_web_search: bool | None = None
+        self.print_history: bool | None = None
+        self.role: str | None = None
+        self.session: str | None = None
+        self.sessions_dir: str | None = None
+        self.thinking: bool | None = None
+        self.thinking_budget: int | None = None
 
 
 def parse_tclaude_args():
@@ -112,7 +123,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("--config", help="Path to the configuration file (default: tclaude.toml)")
     _ = parser.add_argument("-f", "--file", action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response (default: 16384)")
-    _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-0)")
+    _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-20250514)")
     _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
     _ = parser.add_argument("-p", "--print_history", help="Print the conversation history only, without prompting.", action="store_true")
@@ -131,11 +142,65 @@ def parse_tclaude_args():
         print(f"tclaude — Claude in the terminal\nversion {__version__}")
         sys.exit(0)
 
-    args.model = deduce_model_name(args.model)
     return args
 
 
-def load_config(filename: str | None) -> dict[str, JSON]:
+@dataclass_json(undefined=Undefined.RAISE)
+@dataclass
+class McpConfig:
+    local_servers: list[dict[str, JSON]] = field(default_factory=list)
+    remote_servers: list[dict[str, JSON]] = field(default_factory=list)
+
+
+@dataclass_json(undefined=Undefined.RAISE)
+@dataclass
+class TClaudeConfig:
+    max_tokens: int = 2**14  # 16k tokens
+    model: str = "claude-sonnet-4-20250514"
+    role: str | None = default_role()
+
+    code_execution: bool = True
+    web_search: bool = True
+    thinking: bool = False
+    thinking_budget: int | None = None
+
+    sessions_dir: str = default_sessions_dir()
+
+    mcp: McpConfig = field(default_factory=McpConfig)
+
+    # Expected to come from args, but can *technically* be set in the config file.
+    files: list[str] = field(default_factory=list)
+    session: str | None = None
+    verbose: bool = False
+
+    def apply_args_override(self, args: TClaudeArgs):
+        if args.max_tokens is not None:
+            self.max_tokens = args.max_tokens
+        if args.model is not None:
+            self.model = deduce_model_name(args.model)
+        if args.role is not None:
+            self.role = args.role
+
+        if args.no_code_execution is not None:
+            self.code_execution = not args.no_code_execution
+        if args.no_web_search is not None:
+            self.web_search = not args.no_web_search
+        if args.thinking is not None:
+            self.thinking = args.thinking
+        if args.thinking_budget is not None:
+            self.thinking_budget = args.thinking_budget
+
+        if args.sessions_dir is not None:
+            self.sessions_dir = args.sessions_dir
+
+        self.files.extend(args.file)
+        if args.session is not None:
+            self.session = args.session
+        if args.verbose is not None:
+            self.verbose = args.verbose
+
+
+def load_config(filename: str | None) -> TClaudeConfig:
     """
     Load the configuration from the tclaude.toml file located in the config directory.
     """
@@ -154,8 +219,11 @@ def load_config(filename: str | None) -> dict[str, JSON]:
 
     try:
         with open(filename, "rb") as f:
-            config = tomllib.load(f)
+            config = cast(TClaudeConfig, TClaudeConfig.from_dict(tomllib.load(f)))  # pyright: ignore
         return config
-    except Exception as e:
-        logger.error(f"Failed to load configuration from {filename}: {e}")
-        return {}
+    except FileNotFoundError as e:
+        logger.error(f"Failed to load {filename}: {e}")
+    except (tomllib.TOMLDecodeError, ValueError, UndefinedParameterError) as e:
+        logger.error(f"{filename} is invalid: {e}")
+
+    return TClaudeConfig()

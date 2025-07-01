@@ -18,6 +18,7 @@
           aiofiles
           aiohttp
           beautifulsoup4
+          dataclasses-json
           docstring-parser
           html2text
           humanize

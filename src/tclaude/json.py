@@ -20,6 +20,7 @@ from typing import TypeAlias, cast, get_args, get_origin
 
 # Using TypeAlias instead of defining a new type such that isinstance(obj, JSON) works as expected.
 JSON: TypeAlias = Mapping[str, "JSON"] | Sequence["JSON"] | str | int | float | bool | None
+# type JSON = Mapping[str, JSON] | Sequence[JSON] | str | int | float | bool | None
 
 # Allows for nested generic types, as well as unions. The type taken by `isinstance`.
 ClassOrTuple: TypeAlias = type | tuple["ClassOrTuple", ...] | UnionType
@@ -29,6 +30,9 @@ def generic_is_instance(obj: JSON, target_type: ClassOrTuple) -> bool:
     """
     Check if an object is an instance of a generic type, including nested types.
     """
+    # if target_type is JSON:
+    #     return isinstance(obj, (str, int, float, bool, type(None), list, dict))
+
     origin = get_origin(target_type)
     if origin is None or target_type is UnionType:
         return isinstance(obj, target_type)

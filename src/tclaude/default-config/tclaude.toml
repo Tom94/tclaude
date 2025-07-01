@@ -1,5 +1,15 @@
 # Example configuration for remote Model Context Protocol (MCP) servers
 
+# [[mcp.local_servers]]
+# name = "filesystem"
+# command = "npx" # command and arguments to start the MCP server
+# args = [
+#     "-y",
+#     "@modelcontextprotocol/server-filesystem",
+#     "~", # access to the home directory
+# ]
+# or: url = "http://localhost:3000" # if the server is already running
+
 # [[mcp.remote_servers]]
 # name = "example-mcp"
 # url = "https://example-server.modelcontextprotocol.io/sse"

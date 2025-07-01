@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .config import McpConfig
 from .json import JSON, get, get_or, get_or_default
 from .task_context import AsyncContextPool
 from .tool_use import AvailableTools
@@ -352,15 +353,12 @@ class McpServerConfigs:
         return [await server.get_remote_server_desc(session) for server in self.remote_servers if server.url]
 
 
-def setup_mcp(session: aiohttp.ClientSession, config: dict[str, JSON]) -> McpServerConfigs:
+def setup_mcp(session: aiohttp.ClientSession, config: McpConfig) -> McpServerConfigs:
     """
     Get the MCP configuration from the loaded config.
     """
-    if "mcp" not in config:
-        return McpServerConfigs(session, remote_servers=[], local_servers=[])
-
     remote_servers: list[McpServerConfig] = []
-    for s in get_or_default(config["mcp"], "remote_servers", list[dict[str, JSON]]):
+    for s in config.remote_servers:
         try:
             server = McpServerConfig(s)
             if server.type != ConnectionType.URL:
@@ -371,7 +369,7 @@ def setup_mcp(session: aiohttp.ClientSession, config: dict[str, JSON]) -> McpSer
             logger.error(f"Error parsing remote MCP server configuration: {e}")
 
     local_servers: list[McpServerConfig] = []
-    for s in get_or_default(config["mcp"], "local_servers", list[dict[str, JSON]]):
+    for s in config.local_servers:
         try:
             local_servers.append(McpServerConfig(s))
         except ValueError as e:

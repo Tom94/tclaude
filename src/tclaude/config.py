@@ -20,13 +20,10 @@ import logging
 import os
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import cast
 
-from dataclasses_json import Undefined, dataclass_json
-from dataclasses_json.undefined import UndefinedParameterError
-
-from .json import JSON
+from .json import JSON, generic_is_instance
 
 logger = logging.getLogger(__package__)
 
@@ -145,14 +142,12 @@ def parse_tclaude_args():
     return args
 
 
-@dataclass_json(undefined=Undefined.RAISE)
 @dataclass
 class McpConfig:
     local_servers: list[dict[str, JSON]] = field(default_factory=list)
     remote_servers: list[dict[str, JSON]] = field(default_factory=list)
 
 
-@dataclass_json(undefined=Undefined.RAISE)
 @dataclass
 class TClaudeConfig:
     max_tokens: int = 2**14  # 16k tokens
@@ -200,6 +195,36 @@ class TClaudeConfig:
             self.verbose = args.verbose
 
 
+def dataclass_from_dict[T](cls: type[T], data: dict[str, JSON]) -> T:
+    assert is_dataclass(cls), f"Expected a dataclass type, got {cls}"
+
+    result = cls()
+    for f in fields(cls):
+        if f.name in data:
+            if isinstance(f.type, str):
+                raise TypeError(f"field '{f.name}' has an invalid type: {f.type}")
+
+            nested_cls = f.type
+            value = data.pop(f.name)
+
+            if is_dataclass(f.type):
+                if not generic_is_instance(value, dict[str, JSON]):
+                    raise ValueError(f"'{f.name}' must be a dict defining type {f.type}, got {type(value)}")
+
+                setattr(result, f.name, dataclass_from_dict(nested_cls, cast(dict[str, JSON], value)))
+            else:
+                if not generic_is_instance(value, nested_cls):
+                    raise ValueError(f"'{f.name}' must be of type {f.type}, got {type(value)}")
+
+                setattr(result, f.name, value)
+
+    if data:
+        extra_keys = ", ".join(data.keys())
+        raise ValueError(f"unexpected variables: {extra_keys}")
+
+    return result
+
+
 def load_config(filename: str | None) -> TClaudeConfig:
     """
     Load the configuration from the tclaude.toml file located in the config directory.
@@ -219,11 +244,11 @@ def load_config(filename: str | None) -> TClaudeConfig:
 
     try:
         with open(filename, "rb") as f:
-            config = cast(TClaudeConfig, TClaudeConfig.from_dict(tomllib.load(f)))  # pyright: ignore
+            config = dataclass_from_dict(TClaudeConfig, tomllib.load(f))
         return config
     except FileNotFoundError as e:
         logger.error(f"Failed to load {filename}: {e}")
-    except (tomllib.TOMLDecodeError, ValueError, UndefinedParameterError) as e:
+    except (tomllib.TOMLDecodeError, ValueError) as e:
         logger.error(f"{filename} is invalid: {e}")
 
     return TClaudeConfig()

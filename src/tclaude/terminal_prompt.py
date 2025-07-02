@@ -35,6 +35,7 @@ from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from . import common, logging_config
+from .config import TClaudeConfig
 from .commands import Command, CommandCallback, get_commands
 from .common import FileMetadata
 from .session import ChatSession
@@ -147,6 +148,7 @@ class CommandCompleter(Completer):
 
 
 async def terminal_prompt(
+    config: TClaudeConfig,
     lprompt: Callable[[str], str],
     rprompt: Callable[[str], str],
     prompt_session: PromptSession[str],
@@ -176,7 +178,7 @@ async def terminal_prompt(
             prompt_session.rprompt = ANSI(common.prompt_style(rprompt(prefix)))
 
     def on_files_changed(files: dict[str, FileMetadata]):
-        prompt_session.completer = CommandCompleter.from_nested_dict(get_commands(files))
+        prompt_session.completer = CommandCompleter.from_nested_dict(get_commands(config, files))
 
     animate_task = asyncio.create_task(animate_prompts())
     try:
@@ -196,7 +198,7 @@ async def terminal_prompt(
                     handle_sigint=False,
                     default=user_input,
                     accept_default=user_input != "",
-                    completer=CommandCompleter.from_nested_dict(get_commands(session.uploaded_files)),
+                    completer=CommandCompleter.from_nested_dict(get_commands(config, session.uploaded_files)),
                     complete_while_typing=Condition(lambda: prompt_session.app.current_buffer.text.startswith("/")),
                 )
     finally:

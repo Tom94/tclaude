@@ -91,7 +91,7 @@ async def single_prompt(config: TClaudeConfig, history: History, user_input: str
     Main function to parse arguments, get user input, and print Anthropic's response.
     """
 
-    system_prompt = load_system_prompt(config.role) if config.role else None
+    system_prompt = load_system_prompt(config.role)
     session = ChatSession(
         history=history,
         model=config.model,
@@ -100,13 +100,15 @@ async def single_prompt(config: TClaudeConfig, history: History, user_input: str
         name=deduce_session_name(config.session) if config.session else None,
     )
 
+    endpoint = config.get_endpoint_config()
+
     async with AsyncExitStack() as stack:
         client_session: aiohttp.ClientSession = await stack.enter_async_context(aiohttp.ClientSession())
 
         async with asyncio.TaskGroup() as tg:
             if session.uploaded_files:
-                _ = tg.create_task(session.verify_file_uploads(client_session))
-            file_metadata = [tg.create_task(session.upload_file(client_session, f)) for f in config.files]
+                _ = tg.create_task(session.verify_file_uploads(client_session, endpoint))
+            file_metadata = [tg.create_task(session.upload_file(client_session, endpoint, f)) for f in config.files]
             mcp = await stack.enter_async_context(setup_mcp(client_session, config.mcp))
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
@@ -123,6 +125,7 @@ async def single_prompt(config: TClaudeConfig, history: History, user_input: str
         while True:
             response = await stream_response(
                 session=client_session,
+                endpoint=endpoint,
                 model=session.model,
                 history=history,
                 max_tokens=config.max_tokens,
@@ -133,7 +136,7 @@ async def single_prompt(config: TClaudeConfig, history: History, user_input: str
                 mcp_remote_servers=await mcp.get_remote_server_descs(client_session),
                 system_prompt=system_prompt,
                 enable_thinking=config.thinking,
-                thinking_budget=config.thinking_budget,
+                thinking_budget=config.get_thinking_budget(),
             )
 
             history.extend(response.messages)
@@ -160,11 +163,13 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
         name=deduce_session_name(config.session) if config.session else None,
     )
 
+    endpoint = config.get_endpoint_config()
+
     async with AsyncExitStack() as stack:
         client = await stack.enter_async_context(aiohttp.ClientSession())
 
-        file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client)) if session.uploaded_files else None
-        file_upload_tasks = [asyncio.create_task(session.upload_file(client, f)) for f in config.files if f]
+        file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client, endpoint)) if session.uploaded_files else None
+        file_upload_tasks = [asyncio.create_task(session.upload_file(client, endpoint, f)) for f in config.files if f]
 
         mcp = setup_mcp(client, config.mcp)
         mcp_setup = None if mcp.empty else await stack.enter_async_context(TaskAsyncContextManager(mcp))
@@ -248,7 +253,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
         while True:
             if is_user_turn:
                 try:
-                    user_input = await terminal_prompt(lprompt, rprompt, prompt_session, session, user_input)
+                    user_input = await terminal_prompt(config, lprompt, rprompt, prompt_session, session, user_input)
                 except EOFError:
                     break
                 except KeyboardInterrupt:
@@ -258,7 +263,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
 
                 if user_input.startswith("/"):
                     try:
-                        cb = commands.get_callback(user_input.rstrip(), commands.get_commands(session.uploaded_files))
+                        cb = commands.get_callback(user_input.rstrip(), commands.get_commands(config, session.uploaded_files))
                         async with live_print(lambda _: f"Executing '{user_input}' {spinner()}"):
                             await cb()
                     except ValueError as e:
@@ -316,6 +321,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                     stream_task = asyncio.create_task(
                         stream_response(
                             session=client,
+                            endpoint=endpoint,
                             model=config.model,
                             history=session.history,
                             max_tokens=config.max_tokens,
@@ -326,7 +332,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                             mcp_remote_servers=await mcp.get_remote_server_descs(client),
                             system_prompt=session.system_prompt,
                             enable_thinking=config.thinking,
-                            thinking_budget=config.thinking_budget,
+                            thinking_budget=config.get_thinking_budget(),
                             write_cache=write_cache,
                             on_response_update=lambda r: partial_response.__setattr__("messages", r.messages),
                         )
@@ -367,11 +373,11 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                 # Get metadata for new uploaded files for which we don't yet have valid metadata
                 if any(not is_valid_metadata(m) for m in session.uploaded_files.values()):
                     assert file_upload_verification_task is None, "File upload verification task should not be running when we have new uploaded files"
-                    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client))
+                    file_upload_verification_task = asyncio.create_task(session.verify_file_uploads(client, endpoint))
 
                 # Auto-name the session if it is not already named
                 if session.name is None and not session.is_autonaming:
-                    session.start_autoname_task(client)
+                    session.start_autoname_task(client, endpoint)
 
         print()
 

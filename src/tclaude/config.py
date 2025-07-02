@@ -20,8 +20,9 @@ import logging
 import os
 import sys
 import tomllib
-from dataclasses import dataclass, field, fields, is_dataclass
-from typing import cast
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from typing import cast, get_args, get_origin
 
 from .json import JSON, generic_is_instance
 
@@ -40,29 +41,15 @@ def get_config_dir() -> str:
     return os.path.join(config_dir, "tclaude")
 
 
-def default_sessions_dir() -> str:
-    """
-    Get the default session directory.
-    """
-    if "TCLAUDE_SESSIONS_DIR" in os.environ:
-        return os.environ["TCLAUDE_SESSIONS_DIR"]
-    return "."
-
-
-def default_role() -> str | None:
-    default_role = os.path.join(get_config_dir(), "roles", "default.md")
-    if not os.path.isfile(default_role):
-        default_role = None
-
-    return default_role
-
-
 def load_system_prompt(path: str) -> str | None:
     system_prompt = None
     if not os.path.isfile(path):
         candidate = os.path.join(get_config_dir(), "roles", path)
         if os.path.isfile(candidate):
             path = candidate
+        elif path == "default.md":
+            return None  # Be silent if the default prompt is not found.
+
     try:
         with open(path, "r") as f:
             system_prompt = f.read().strip()
@@ -97,10 +84,10 @@ class TClaudeArgs(argparse.Namespace):
 
         self.config: str = "tclaude.toml"
         self.version: bool = False
-        self.verbose: bool = False
         self.print_history: bool = False
 
         # Configuration overrides (default values are set in TClaudeConfig)
+        self.endpoint: str | None = None
         self.file: list[str] = []
         self.max_tokens: int | None = None
         self.model: str | None = None
@@ -111,6 +98,7 @@ class TClaudeArgs(argparse.Namespace):
         self.sessions_dir: str | None = None
         self.thinking: bool | None = None
         self.thinking_budget: int | None = None
+        self.verbose: bool | None = None
 
 
 def parse_tclaude_args():
@@ -118,6 +106,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("input", nargs="*", help="Input text to send to Claude")
 
     _ = parser.add_argument("--config", help="Path to the configuration file (default: tclaude.toml)")
+    _ = parser.add_argument("-e", "--endpoint", help="Endpoint to use for the API (default: anthropic). Custom endpoints can be defined in the config file.")
     _ = parser.add_argument("-f", "--file", action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", help="Maximum number of tokens in the response (default: 16384)")
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-20250514)")
@@ -149,17 +138,46 @@ class McpConfig:
 
 
 @dataclass
+class EndpointConfig:
+    kind: str  # "anthropic" or "vertex"
+    url: str
+    api_key: str | None = None
+
+    def __post_init__(self):
+        if self.kind not in ("anthropic", "vertex"):
+            raise ValueError(f"Invalid endpoint kind: {self.kind}. Expected 'anthropic' or 'vertex'.")
+
+        if self.api_key and self.api_key.startswith("$"):
+            tmp = self.api_key[1:]
+            if tmp.startswith("(") and tmp.endswith(")"):
+                import subprocess
+
+                self.api_key = subprocess.check_output(tmp[1:-1], shell=True).decode("utf-8").strip()
+            else:
+                if tmp.startswith("{") and tmp.endswith("}"):
+                    tmp = tmp[1:-1]
+
+                if tmp not in os.environ:
+                    raise ValueError(f"API key environment variable '{tmp}' not set.")
+
+                self.api_key = os.getenv(tmp)
+
+
+@dataclass
 class TClaudeConfig:
-    max_tokens: int = 2**14  # 16k tokens
-    model: str = "claude-sonnet-4-20250514"
-    role: str | None = default_role()
+    max_tokens: int
+    model: str
+    role: str
 
-    code_execution: bool = True
-    web_search: bool = True
-    thinking: bool = False
-    thinking_budget: int | None = None
+    endpoint: str
+    endpoints: dict[str, EndpointConfig]
 
-    sessions_dir: str = default_sessions_dir()
+    code_execution: bool
+    web_search: bool
+    thinking: bool
+    thinking_budget: int | str
+
+    sessions_dir: str
 
     mcp: McpConfig = field(default_factory=McpConfig)
 
@@ -168,6 +186,30 @@ class TClaudeConfig:
     session: str | None = None
     verbose: bool = False
 
+    def __post_init__(self):
+        self.role = os.path.expanduser(self.role)
+        self.sessions_dir = os.path.expanduser(self.sessions_dir)
+
+        self.files = [os.path.expanduser(f) for f in self.files]
+        self.session = os.path.expanduser(self.session) if self.session else None
+
+    def get_endpoint_config(self) -> EndpointConfig:
+        if self.endpoint not in self.endpoints:
+            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
+
+        return self.endpoints[self.endpoint]
+
+    def get_thinking_budget(self) -> int:
+        if isinstance(self.thinking_budget, str):
+            if self.thinking_budget == "auto":
+                if self.max_tokens < 1024:
+                    raise ValueError("Auto thinking budget requires max_tokens to be at least 1024.")
+                return self.max_tokens // 2
+            else:
+                raise ValueError(f"Invalid thinking budget: {self.thinking_budget}. Expected 'auto' or an integer.")
+
+        return self.thinking_budget
+
     def apply_args_override(self, args: TClaudeArgs):
         if args.max_tokens is not None:
             self.max_tokens = args.max_tokens
@@ -175,6 +217,12 @@ class TClaudeConfig:
             self.model = deduce_model_name(args.model)
         if args.role is not None:
             self.role = args.role
+
+        if args.endpoint is not None:
+            self.endpoint = args.endpoint
+
+        if self.endpoint not in self.endpoints:
+            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
 
         if args.no_code_execution is not None:
             self.code_execution = not args.no_code_execution
@@ -195,60 +243,95 @@ class TClaudeConfig:
             self.verbose = args.verbose
 
 
-def dataclass_from_dict[T](cls: type[T], data: dict[str, JSON]) -> T:
-    assert is_dataclass(cls), f"Expected a dataclass type, got {cls}"
+def dataclass_from_dict[T](cls: type[T], data: JSON, name: str = "config") -> T:
+    if not is_dataclass(cls):
+        origin = get_origin(cls)
+        args = get_args(cls)
+        if origin is list:
+            if not isinstance(data, list):
+                raise ValueError(f"{name} must be a list of type {cls}, got {type(data)}")
 
-    result = cls()
+            U = cast(type, args[0])
+            return cast(T, [dataclass_from_dict(U, item, f"{name}[{i}]") for i, item in enumerate(data)])
+        elif origin is dict:
+            if not isinstance(data, dict):
+                raise ValueError(f"{name} must be a dict of type {cls}, got {type(data)}")
+
+            if args[0] is not str:
+                raise ValueError(f"{name} must be a dict with string keys, got {args[0]}")
+
+            V = cast(type, args[1])
+            return cast(T, {k: dataclass_from_dict(V, v, f"{name}.{k}") for k, v in data.items()})
+
+        if not generic_is_instance(data, cls):
+            raise ValueError(f"{name} must be of type {cls}, got {type(data)}")
+
+        return cast(T, data)
+
+    assert is_dataclass(cls), f"Expected a dataclass type, got {cls}"
+    if not isinstance(data, dict) or not generic_is_instance(data, dict[str, JSON]):
+        raise ValueError(f"Must be of type dict, got {type(data)}")
+
+    result = {}
     for f in fields(cls):
+        if f.name not in data and f.default == MISSING and f.default_factory == MISSING:
+            raise ValueError(f"{name}: missing required field '{f.name}'")
+
         if f.name in data:
             if isinstance(f.type, str):
                 raise TypeError(f"field '{f.name}' has an invalid type: {f.type}")
 
             nested_cls = f.type
+
             value = data.pop(f.name)
-
-            if is_dataclass(f.type):
-                if not generic_is_instance(value, dict[str, JSON]):
-                    raise ValueError(f"'{f.name}' must be a dict defining type {f.type}, got {type(value)}")
-
-                setattr(result, f.name, dataclass_from_dict(nested_cls, cast(dict[str, JSON], value)))
-            else:
-                if not generic_is_instance(value, nested_cls):
-                    raise ValueError(f"'{f.name}' must be of type {f.type}, got {type(value)}")
-
-                setattr(result, f.name, value)
+            nested_name = f"{name}.{f.name}" if name else f.name
+            result[f.name] = dataclass_from_dict(nested_cls, value, nested_name)
 
     if data:
         extra_keys = ", ".join(data.keys())
         raise ValueError(f"unexpected variables: {extra_keys}")
 
-    return result
+    return cls(**result)
 
 
-def load_config(filename: str | None) -> TClaudeConfig:
+def deep_update(d: dict[str, JSON], u: Mapping[str, JSON]) -> dict[str, JSON]:
+    for k, v in u.items():
+        if isinstance(v, Mapping) and (dv := d.get(k)) and isinstance(dv, dict):
+            d[k] = deep_update(dv, v)
+        else:
+            d[k] = v
+
+    return d
+
+
+def load_config(filename: str) -> TClaudeConfig | None:
     """
     Load the configuration from the tclaude.toml file located in the config directory.
     """
-    if filename is None:
-        filename = "tclaude.toml"
-
-    if not os.path.isfile(filename):
-        filename = os.path.join(get_config_dir(), filename)
-        if not os.path.isfile(filename):
-            logger.debug(f"Configuration file {filename} not found. Using default configuration.")
-
-            from importlib import resources
-
-            resources_path = resources.files(__package__)
-            filename = str(resources_path.joinpath("default-config", "tclaude.toml"))
 
     try:
-        with open(filename, "rb") as f:
-            config = dataclass_from_dict(TClaudeConfig, tomllib.load(f))
-        return config
+        from importlib import resources
+
+        resources_path = resources.files(__package__)
+        default_config_filename = str(resources_path.joinpath("default-config", "tclaude.toml"))
+        logger.debug(f"Loading default config from {default_config_filename}")
+        with open(default_config_filename, "rb") as f:
+            config_dict = tomllib.load(f)
+
+        if not os.path.isfile(filename):
+            filename = os.path.join(get_config_dir(), filename)
+
+        if os.path.isfile(filename):
+            logger.debug(f"Loading user configuration from {filename}")
+            with open(filename, "rb") as f:
+                user_config_dict = tomllib.load(f)
+
+            config_dict = deep_update(config_dict, user_config_dict)
+
+        return dataclass_from_dict(TClaudeConfig, config_dict)
     except FileNotFoundError as e:
         logger.error(f"Failed to load {filename}: {e}")
     except (tomllib.TOMLDecodeError, ValueError) as e:
         logger.error(f"{filename} is invalid: {e}")
 
-    return TClaudeConfig()
+    return None

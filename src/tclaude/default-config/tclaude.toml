@@ -1,3 +1,31 @@
+# Default configuration for the tclaude CLI tool.
+# All settings can be omitted in your own config, in which case the defaults from this file will be used.
+
+model = "claude-sonnet-4-20250514"
+max_tokens = 16384
+role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tclaude/roles/
+
+code_execution = true
+web_search = true
+thinking = false
+thinking_budget = "auto"  # In tokens. (default: max_tokens / 2)
+
+sessions_dir = "."  # Directory for storing session data.
+
+endpoint = "anthropic"
+
+[endpoints.anthropic]
+kind = "anthropic"
+url = "https://api.anthropic.com/v1"
+api_key = "$ANTHROPIC_API_KEY"
+
+# Example custom vertex endpoint
+
+# [endpoints.custom]
+# kind = "vertex"
+# url = "https://aiplatform.googleapis.com/v1/projects/<VERTEX_API_PROJECT>/locations/global/publishers/anthropic/models/<MODEL>:streamRawPredict"
+# api_key = "$(gcloud auth print-access-token)"
+
 # Example configuration for remote Model Context Protocol (MCP) servers
 
 # [[mcp.local_servers]]

@@ -29,6 +29,7 @@ from partial_json_parser import loads as ploads  # pyright: ignore
 
 from . import common, endpoints, files, tool_use
 from .common import History
+from .config import EndpointConfig
 from .json import JSON, get, get_or, get_or_default
 from .token_counter import TokenCounter
 from .tool_use import AvailableTools
@@ -74,6 +75,7 @@ class Response:
 
 async def stream_response(
     session: aiohttp.ClientSession,
+    endpoint: EndpointConfig,
     model: str,
     history: History,
     max_tokens: int = 16384,
@@ -101,8 +103,7 @@ async def stream_response(
         enable_thinking = False
         max_tokens = min(max_tokens, 8192)
 
-    url, headers, params = endpoints.get_messages_endpoint_anthropic(model)
-    # url, headers, params = endpoints.get_messages_endpoint_vertex("claude-sonnet-4@20250514")
+    url, headers, params = endpoints.get_messages_endpoint(model, endpoint)
 
     # Use the latest container if available
     container = common.get_latest_container(history)

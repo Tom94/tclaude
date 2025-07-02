@@ -19,16 +19,17 @@ import asyncio
 import json
 import mimetypes
 import os
+import sys
 from collections.abc import Mapping
 from typing import cast
 
 import aiofiles
 import aiohttp
 
-from . import endpoints
+from . import endpoints, logging_config
 from .common import FileMetadata
+from .config import EndpointConfig, load_config
 from .json import JSON, get, get_or
-
 
 MAX_FILE_LIST = 1000
 
@@ -42,8 +43,8 @@ def mime_type_to_content_block_type(mime_type: str) -> str | None:
         return None
 
 
-async def list_files(session: aiohttp.ClientSession, after_file_id: str | None, num_files: int = 50) -> JSON:
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def list_files(session: aiohttp.ClientSession, endpoint: EndpointConfig, after_file_id: str | None, num_files: int = 50) -> JSON:
+    url, headers = endpoints.get_files_endpoint(endpoint)
     params: dict[str, int | str] = {"limit": num_files}
     if after_file_id:
         params["after_id"] = after_file_id
@@ -55,8 +56,8 @@ async def list_files(session: aiohttp.ClientSession, after_file_id: str | None, 
     return data
 
 
-async def rm_file(session: aiohttp.ClientSession, file_id: str) -> JSON:
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def rm_file(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_id: str) -> JSON:
+    url, headers = endpoints.get_files_endpoint(endpoint)
     url += f"/{file_id}"
 
     try:
@@ -74,7 +75,7 @@ async def rm_file(session: aiohttp.ClientSession, file_id: str) -> JSON:
     return data
 
 
-async def upload_file(session: aiohttp.ClientSession, file_path: str) -> FileMetadata:
+async def upload_file(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_path: str) -> FileMetadata:
     async with aiofiles.open(file_path, "rb") as file:  # pyright: ignore[reportUnknownMemberType]
         file_data = await file.read()
 
@@ -82,20 +83,22 @@ async def upload_file(session: aiohttp.ClientSession, file_path: str) -> FileMet
     if mime_type is None:
         mime_type = "application/octet-stream"
 
-    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+    return await upload_file_mem(session, endpoint, file_path, file_data, mime_type, content_encoding)
 
 
 async def upload_file_base64(
-    session: aiohttp.ClientSession, file_path: str, file_data_base64: str, mime_type: str, content_encoding: str | None
+    session: aiohttp.ClientSession, endpoint: EndpointConfig, file_path: str, file_data_base64: str, mime_type: str, content_encoding: str | None
 ) -> FileMetadata:
     import base64
 
     file_data = base64.b64decode(file_data_base64)
-    return await upload_file_mem(session, file_path, file_data, mime_type, content_encoding)
+    return await upload_file_mem(session, endpoint, file_path, file_data, mime_type, content_encoding)
 
 
-async def upload_file_mem(session: aiohttp.ClientSession, file_path: str, file_data: bytes, mime_type: str, content_encoding: str | None) -> FileMetadata:
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def upload_file_mem(
+    session: aiohttp.ClientSession, endpoint: EndpointConfig, file_path: str, file_data: bytes, mime_type: str, content_encoding: str | None
+) -> FileMetadata:
+    url, headers = endpoints.get_files_endpoint(endpoint)
 
     try:
         if content_encoding is not None:
@@ -118,8 +121,8 @@ async def upload_file_mem(session: aiohttp.ClientSession, file_path: str, file_d
     return data
 
 
-async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> FileMetadata:
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def get_file_metadata(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_id: str) -> FileMetadata:
+    url, headers = endpoints.get_files_endpoint(endpoint)
     url += f"/{file_id}"
 
     try:
@@ -132,12 +135,12 @@ async def get_file_metadata(session: aiohttp.ClientSession, file_id: str) -> Fil
     return data
 
 
-async def get_file_metadata_or_none(session: aiohttp.ClientSession, file_id: str) -> FileMetadata | None:
+async def get_file_metadata_or_none(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_id: str) -> FileMetadata | None:
     """
     Get file metadata, returning None if the file does not exist.
     """
     try:
-        return await get_file_metadata(session, file_id)
+        return await get_file_metadata(session, endpoint, file_id)
     except FileNotFoundError:
         return None
 
@@ -154,8 +157,8 @@ def get_path_from_metadata(file_id: str, metadata: FileMetadata) -> str:
     return filename
 
 
-async def download_file(session: aiohttp.ClientSession, file_id: str, file_path: str):
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def download_file(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_id: str, file_path: str):
+    url, headers = endpoints.get_files_endpoint(endpoint)
     url += f"/{file_id}/content"
 
     try:
@@ -169,8 +172,8 @@ async def download_file(session: aiohttp.ClientSession, file_id: str, file_path:
         raise FileNotFoundError(f"Failed to download file {file_id}: {e.message}") from e
 
 
-async def download_file_mem(session: aiohttp.ClientSession, file_id: str) -> bytes:
-    url, headers = endpoints.get_files_endpoint_anthropic()
+async def download_file_mem(session: aiohttp.ClientSession, endpoint: EndpointConfig, file_id: str) -> bytes:
+    url, headers = endpoints.get_files_endpoint(endpoint)
     url += f"/{file_id}/content"
 
     try:
@@ -185,7 +188,10 @@ class FilesArgs(argparse.Namespace):
     def __init__(self):
         super().__init__()
 
+        self.config: str = "tclaude.toml"
+        self.endpoint: str | None = None
         self.command: str | None = None
+        self.verbose: bool = False
 
         # ls
         self.after_file_id: str | None = ""
@@ -200,6 +206,10 @@ async def async_main():
     Main function to parse arguments, load a JSON file containing conversation history, and print it.
     """
     parser = argparse.ArgumentParser(description="Server file operations for Anthropic AI models")
+    _ = parser.add_argument("--config", help="Path to the configuration file (default: tclaude.toml)")
+    _ = parser.add_argument("-e", "--endpoint", help="Endpoint to use for file operations (default: from config)")
+    _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+
     subparsers = parser.add_subparsers(dest="command", help="commands")
 
     ls_parser = subparsers.add_parser("ls", help="List files")
@@ -217,6 +227,20 @@ async def async_main():
 
     args = parser.parse_args(namespace=FilesArgs())
 
+    logging_config.setup(verbose=args.verbose)
+
+    config = load_config(args.config)
+    if not config:
+        print("Failed to load configuration. Please check your config file.", file=sys.stderr)
+        return
+
+    if args.endpoint:
+        config.endpoint = args.endpoint
+    if config.endpoint not in config.endpoints:
+        raise ValueError(f"Endpoint '{config.endpoint}' not found in configuration. Available endpoints: {list(config.endpoints.keys())}")
+
+    endpoint = config.endpoints[config.endpoint]
+
     if not args.command:
         parser.print_help()
         return
@@ -224,7 +248,7 @@ async def async_main():
     async with aiohttp.ClientSession() as session:
         if args.command == "ls":
             print(f"Listing {args.num_files} files after {args.after_file_id or 'start'}")
-            files = await list_files(session, args.after_file_id, args.num_files)
+            files = await list_files(session, endpoint, args.after_file_id, args.num_files)
             print(f"Files: {json.dumps(files, indent=2)}")
         elif args.command == "rm":
             print("Deleting files:", ", ".join(args.files))
@@ -233,7 +257,7 @@ async def async_main():
                 return
 
             if "all" in args.files:
-                files = await list_files(session, None, MAX_FILE_LIST)
+                files = await list_files(session, endpoint, None, MAX_FILE_LIST)
                 data = get(files, "data", list[JSON])
                 if data:
                     args.files = [str(file["id"]) for file in data if isinstance(file, Mapping) and "id" in file]
@@ -241,7 +265,7 @@ async def async_main():
             rm_tasks: list[asyncio.Task[JSON]] = []
             async with asyncio.TaskGroup() as tg:
                 for file_id in args.files:
-                    rm_tasks.append(tg.create_task(rm_file(session, file_id)))
+                    rm_tasks.append(tg.create_task(rm_file(session, endpoint, file_id)))
 
             for task, file in zip(rm_tasks, args.files):
                 result = task.result()
@@ -258,7 +282,7 @@ async def async_main():
                     if not os.path.isfile(file_path):
                         print(f"File {file_path} does not exist or is not a file.")
                         continue
-                    upload_tasks.append(tg.create_task(upload_file(session, file_path)))
+                    upload_tasks.append(tg.create_task(upload_file(session, endpoint, file_path)))
 
             for task, file in zip(upload_tasks, args.files):
                 result = task.result()
@@ -270,10 +294,10 @@ async def async_main():
                 return
 
             async def get_filename_and_download(session: aiohttp.ClientSession, file_id: str):
-                metadata = await get_file_metadata(session, file_id)
+                metadata = await get_file_metadata(session, endpoint, file_id)
                 file_path = get_or(metadata, "filename", f"{file_id}.txt")
                 file_path = os.path.basename(file_path)
-                await download_file(session, file_id, file_path)
+                await download_file(session, endpoint, file_id, file_path)
 
             download_tasks: list[asyncio.Task[None]] = []
             async with asyncio.TaskGroup() as tg:

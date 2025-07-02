@@ -88,9 +88,13 @@ async def async_main():
 
     args = parse_tclaude_args()
 
-    logging_config.setup(verbose=args.verbose)
+    logging_config.setup(verbose=args.verbose is True)
 
     config = load_config(args.config)
+    if not config:
+        print("Failed to load configuration. Please check your config file.", file=sys.stderr)
+        sys.exit(1)
+
     config.apply_args_override(args)
 
     print_history = args.print_history

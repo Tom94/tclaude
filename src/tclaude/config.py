@@ -94,7 +94,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-20250514)")
     _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
-    _ = parser.add_argument("-p", "--print_history", help="Print the conversation history only, without prompting.", action="store_true")
+    _ = parser.add_argument("-p", "--print-history", help="Print the conversation history only, without prompting.", action="store_true")
     _ = parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt (default: default.md)")
     _ = parser.add_argument("-s", "--session", help="Path to session file for conversation history", nargs="?", const="fzf")
     _ = parser.add_argument("--sessions-dir", help="Path to directory for session files (default: current directory)")

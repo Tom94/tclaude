@@ -200,7 +200,14 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
             return f"{prefix}{common.CHEVRON} "
 
         def rprompt(prefix: str) -> str:
-            rprompt = f"{session.total_tokens.total_cost(session.model):.03f}   {common.friendly_model_name(session.model)} "
+            rprompt = f" {common.friendly_model_name(session.model)} "
+            if endpoint.url == "https://api.anthropic.com":
+                # Our cost settings only apply to the official anthropic endpoint
+                rprompt = f" {session.total_tokens.total_cost(session.model):.03f}  {rprompt}"
+
+            if config.endpoint != "anthropic":
+                rprompt = f"󰴽 {config.endpoint}  {rprompt}"
+
             if session.role:
                 rprompt = f"󱜙 {session.role}  {rprompt}"
 

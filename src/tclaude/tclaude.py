@@ -79,13 +79,6 @@ async def fzf_sessions(sessions_dir: str) -> str:
 
 
 async def async_main():
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        print(
-            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     args = parse_tclaude_args()
 
     logging_config.setup(verbose=args.verbose is True)

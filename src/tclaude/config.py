@@ -147,6 +147,12 @@ class EndpointConfig:
                     tmp = tmp[1:-1]
 
                 if tmp not in os.environ:
+                    # Better error message for beginners that try to use the default config without having set the environment variable.
+                    if self.url == "https://api.anthropic.com/v1" and tmp == "ANTHROPIC_API_KEY":
+                        raise ValueError(
+                            "Set the ANTHROPIC_API_KEY environment variable to your API key to use tclaude.\nYou can get an API key at https://console.anthropic.com/settings/keys"
+                        )
+
                     raise ValueError(f"API key environment variable '{tmp}' not set.")
 
                 self.api_key = os.getenv(tmp)

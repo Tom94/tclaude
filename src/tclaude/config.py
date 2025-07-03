@@ -66,6 +66,7 @@ class TClaudeArgs(argparse.Namespace):
 
         self.config: str = "tclaude.toml"
         self.version: bool = False
+        self.print_default_config: bool = False
         self.print_history: bool = False
 
         # Configuration overrides (default values are set in TClaudeConfig)
@@ -94,6 +95,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("-m", "--model", help="Anthropic model to use (default: claude-sonnet-4-20250514)")
     _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
+    _ = parser.add_argument("--print-default-config", help="Print the default config to stdout.", action="store_true")
     _ = parser.add_argument("-p", "--print-history", help="Print the conversation history only, without prompting.", action="store_true")
     _ = parser.add_argument("-r", "--role", help="Path to a markdown file containing a system prompt (default: default.md)")
     _ = parser.add_argument("-s", "--session", help="Path to session file for conversation history", nargs="?", const="fzf")
@@ -104,13 +106,31 @@ def parse_tclaude_args():
     _ = parser.add_argument("-v", "--version", action="store_true", help="Print version information and exit")
 
     args = parser.parse_args(namespace=TClaudeArgs())
+
     if args.version:
         from . import __version__
 
         print(f"tclaude — Claude in the terminal\nversion {__version__}")
         sys.exit(0)
 
+    if args.print_default_config:
+        print_default_config()
+        sys.exit(0)
+
     return args
+
+
+def default_config_path() -> str:
+    from importlib import resources
+
+    resources_path = resources.files(__package__)
+    default_config_path = str(resources_path.joinpath("default-config", "tclaude.toml"))
+    return default_config_path
+
+
+def print_default_config():
+    with open(default_config_path(), "r") as f:
+        print(f.read())
 
 
 @dataclass
@@ -336,12 +356,9 @@ def load_config(filename: str) -> TClaudeConfig | None:
     """
 
     try:
-        from importlib import resources
-
-        resources_path = resources.files(__package__)
-        default_config_filename = str(resources_path.joinpath("default-config", "tclaude.toml"))
-        logger.debug(f"Loading default config from {default_config_filename}")
-        with open(default_config_filename, "rb") as f:
+        dcp = default_config_path()
+        logger.debug(f"Loading default config from {dcp}")
+        with open(dcp, "rb") as f:
             config_dict = tomllib.load(f)
 
         if not os.path.isfile(filename):

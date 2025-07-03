@@ -97,7 +97,8 @@ class TClaudeArgs(argparse.Namespace):
 
         self.config: str = "tclaude.toml"
         self.version: bool = False
-        self.verbose: bool | None = None
+        self.verbose: bool = False
+        self.print_history: bool = False
 
         # Configuration overrides (default values are set in TClaudeConfig)
         self.file: list[str] = []
@@ -105,7 +106,6 @@ class TClaudeArgs(argparse.Namespace):
         self.model: str | None = None
         self.no_code_execution: bool | None = None
         self.no_web_search: bool | None = None
-        self.print_history: bool | None = None
         self.role: str | None = None
         self.session: str | None = None
         self.sessions_dir: str | None = None

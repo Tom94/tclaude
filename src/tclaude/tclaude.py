@@ -88,10 +88,14 @@ async def async_main():
 
     args = parse_tclaude_args()
 
-    logging_config.setup(verbose=args.verbose is True)
+    logging_config.setup(verbose=args.verbose)
 
     config = load_config(args.config)
     config.apply_args_override(args)
+
+    print_history = args.print_history
+    args_input = args.input
+    del args  # Ensure we don't accidentally use args (as opposed to config) after this point
 
     logger.debug(f"Logging setup complete: verbose={config.verbose}")
 
@@ -101,11 +105,11 @@ async def async_main():
     wrap_width = common.get_wrap_width()
 
     history = common.load_session_if_exists(config.session, config.sessions_dir) if config.session else []
-    if args.print_history:
+    if print_history:
         print(await history_to_string(history, pretty=True, wrap_width=wrap_width), flush=True)
         return
 
-    user_input = read_user_input(args.input)
+    user_input = read_user_input(args_input)
 
     # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)
     if not sys.stdout.isatty():

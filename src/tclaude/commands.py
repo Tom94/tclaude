@@ -23,6 +23,7 @@ from typing import Callable, TypeAlias
 import aiohttp
 
 from . import common, files
+from .config import EndpointConfig, TClaudeConfig
 from .json import get_or
 
 CommandCallback: TypeAlias = Callable[[], Awaitable[None]]
@@ -44,19 +45,21 @@ async def exit():
     raise EOFError
 
 
-async def download_file(file_id: str, file_path: str):
+async def download_file(endpoint: EndpointConfig, file_id: str, file_path: str):
     async with aiohttp.ClientSession() as client:
-        await files.download_file(client, file_id, file_path)
+        await files.download_file(client, endpoint, file_id, file_path)
 
     logger.info(f"[✓] Downloaded '{file_path}' (id={file_id})")
 
 
-def get_commands(uploaded_files: dict[str, files.FileMetadata]) -> dict[str, Command]:
+def get_commands(config: TClaudeConfig, uploaded_files: dict[str, common.FileMetadata]) -> dict[str, Command]:
     result: dict[str, Command] = {
         "/help": print_help,
         "/exit": exit,
         "/download": {},
     }
+
+    endpoint = config.get_endpoint_config()
 
     if uploaded_files:
         file_commands: dict[str, Command] = {}
@@ -64,7 +67,7 @@ def get_commands(uploaded_files: dict[str, files.FileMetadata]) -> dict[str, Com
             if not metadata.get("downloadable", False):
                 continue
             filename = get_or(metadata, "filename", "<unknown>")
-            file_commands[filename] = partial(download_file, id, filename)
+            file_commands[filename] = partial(download_file, endpoint, id, filename)
 
         result["/download"] = file_commands
 

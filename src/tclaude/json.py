@@ -22,6 +22,8 @@ from typing import TypeAlias, cast, get_args, get_origin
 JSON: TypeAlias = Mapping[str, "JSON"] | Sequence["JSON"] | str | int | float | bool | None
 # type JSON = Mapping[str, JSON] | Sequence[JSON] | str | int | float | bool | None
 
+JSON_ARGS = get_args(JSON)
+
 # Allows for nested generic types, as well as unions. The type taken by `isinstance`.
 ClassOrTuple: TypeAlias = type | tuple["ClassOrTuple", ...] | UnionType
 
@@ -46,7 +48,7 @@ def generic_is_instance(obj: JSON, target_type: ClassOrTuple) -> bool:
         V = cast(ClassOrTuple, args[1])
         return isinstance(obj, dict) and all(generic_is_instance(k, K) and generic_is_instance(v, V) for k, v in obj.items())
     elif origin is UnionType:
-        assert args == get_args(JSON), "UnionType should only be used with JSON types"
+        assert all(a in JSON_ARGS for a in cast(Sequence[type], args)), "UnionType should only be used with JSON types"
         return isinstance(obj, (str, int, float, bool, type(None), list, dict))
     else:
         return False

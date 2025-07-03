@@ -60,11 +60,11 @@ Once you're done chatting, the session will be automatically named and saved as 
 
 You can resume the session with `tclaude -s <session-name>.json` or browse past sessions with fuzzy finding via `tclaude -s`.
 
-Customize where sessions are saved by passing `--sessions-dir <dir>` or by setting the `TCLAUDE_SESSIONS_DIR` environment variable.
+Customize where sessions are saved by passing `--sessions-dir <dir>` or by setting `sessions_dir` in the [configuration file](#configuration).
 
 ### Extended thinking
 
-Enable thinking with `--thinking`
+Enable thinking with `--thinking` or by setting `thinking = true` in the [configuration file](#configuration).
 
 ```bash
 tclaude --thinking "Write a quine in C++."
@@ -80,7 +80,7 @@ Several commands are available to do other things than chatting with Claude, suc
 If you'd like to customize the behavior of Claude (e.g. tell it to be brief, or give it background information), create `~/.configs/tclaude/roles/default.md`.
 The content of this file will be prepended as system prompt to all conversations.
 
-If you'd like to load different system prompts on a case-by-case basis, you can pass them as
+If you'd like to load different system prompts on a case-by-case basis, you can pass them as command line argument or set `role` in the [configuration file](#configuration).
 
 ```bash
 tclaude --role pirate.md "How do I make great pasta?"
@@ -92,10 +92,15 @@ tclaude --role pirate.md "How do I make great pasta?"
 Simply implement your tool as a function in `src/tclaude/tools.py` and it will be callable by Claude.
 Make sure to [document](https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/implement-tool-use#best-practices-for-tool-definitions) the tools' function thoroughly such that Claude uses it optimally.
 
+### Custom endpoints
+
+**tclaude** can connect to any [Anthropic-compatible endpoint](https://docs.anthropic.com/en/docs/claude-code/third-party-integrations).
+By default **tclaude** uses Anthropic's official API endpoint, but you can set up your own endpoint in the [configuration file](#configuration) and then use it with `tclaude --endpoint <name>`.
+
 ### MCP server support
 
-To connect **tclaude** to [MCP servers](https://mcpservers.org), create `~/.configs/tclaude/tclaude.toml` with the servers' address and authentication info.
-Two kinds of servers are supported:
+**tclaude** supports two kinds of [MCP servers](https://mcpservers.org).
+See the [the configuration section](#configuration) for details on how to set up the servers.
 
 1. Remote servers (e.g. [remote-mcp-servers](https://mcpservers.org/remote-mcp-servers))
     - Claude will connect directly to the server and use the tools it provides. The connection is not made by your machine.
@@ -107,37 +112,78 @@ Two kinds of servers are supported:
     - Local servers are useful for tools that require access to local resources (e.g. files on your machine).
     - Two protocols are supported: STDIN (**tclaude** starts the server and pipes the input to it) and HTTPS (**tclaude** connects to the server via a URL).
 
-Example MCP configuration for `~/.configs/tclaude/tclaude.toml`:
+### Configuration
+
+You can configure **tclaude** by creating the `~/.configs/tclaude/tclaude.toml` file.
+If you have `$XDG_CONFIG_HOME` set, the file should be placed at `$XDG_CONFIG_HOME/tclaude/tclaude.toml`.
+
+The default configuration file looks as follows. (Or use `tclaude --print-default-config` to print it to stdout.)
+You can copy it as a starting point for your own configuration or you can only set the settings you want to differ from the defaults.
+Commenta indicate optional settings such as custom endpoints or MCP servers.
+
+Nearly all settings can be overridden via command line arguments, e.g. `tclaude --thinking` or `tclaude --no-web-search`.
+Run `tclaude --help` to see all available arguments.
 
 ```toml
-[[mcp.local_servers]]
-name = "filesystem"
-command = "npx" # command and arguments to start the MCP server
-args = [
-    "-y",
-    "@modelcontextprotocol/server-filesystem",
-    "~", # access to the home directory
-]
+# Default configuration for the tclaude CLI tool.
+# All settings can be omitted in your own config, in which case the defaults from this file will be used.
+
+model = "claude-sonnet-4-20250514"
+max_tokens = 16384
+role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tclaude/roles/
+
+code_execution = true
+web_search = true
+thinking = false
+thinking_budget = "auto"  # In tokens. (default: max_tokens / 2)
+
+sessions_dir = "."  # Directory for storing session data.
+
+endpoint = "anthropic"
+
+[endpoints.anthropic]
+kind = "anthropic"
+url = "https://api.anthropic.com/v1"
+api_key = "$ANTHROPIC_API_KEY"
+
+# Example vertex endpoint
+
+# [endpoints.custom]
+# kind = "vertex"
+# url = "https://aiplatform.googleapis.com/v1/projects/<VERTEX_API_PROJECT>/locations/global/publishers/anthropic/models/<MODEL>:streamRawPredict"
+# api_key = "$(gcloud auth print-access-token)"
+
+# Example configuration for remote Model Context Protocol (MCP) servers
+
+# [[mcp.local_servers]]
+# name = "filesystem"
+# command = "npx" # command and arguments to start the MCP server
+# args = [
+#     "-y",
+#     "@modelcontextprotocol/server-filesystem",
+#     "~", # access to the home directory
+# ]
 # or: url = "http://localhost:3000" # if the server is already running
 
-[[mcp.remote_servers]]
-name = "example-mcp"
-url = "https://example-server.modelcontextprotocol.io/sse"
+# [[mcp.remote_servers]]
+# name = "example-mcp"
+# url = "https://example-server.modelcontextprotocol.io/sse"
 
-authentication = "oauth2" # opens a browser window to authenticate on first use
+# authentication = "oauth2" # opens a browser window to authenticate on first use
 # or: authentication = "none"
 # or: authentication = "token", authorization_token = "<your-authorization-token>"
 
 # Optional: restrict the tools that can be used with this MCP server
+# authorization_token = "<your-authorization-token>"
 # tool_configuration.enabled = true
 # tool_configuration.allowed_tools = [
 #   "example_tool_1",
 #   "example_tool_2",
 # ]
-
-[[mcp.remote_servers]]
-name = "another-remote-mcp-server"
-url = "..."
+#
+# [[mcp.remote_servers]]
+# name = "another-mcp"
+# ...
 ```
 
 ## License

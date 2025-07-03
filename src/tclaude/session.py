@@ -26,7 +26,8 @@ import aiohttp
 from humanize import naturalsize
 
 from . import common, files, prompt
-from .common import History, is_valid_metadata
+from .config import EndpointConfig
+from .common import FileMetadata, History, is_valid_metadata
 from .event import AsyncEventEmitter
 from .json import JSON, get, get_or_default
 from .print import history_to_string
@@ -53,10 +54,10 @@ class ChatSession:
 
         # Extract metadata from the history, like info about files we previously uploaded and older user messages.
         self.user_messages: list[str] = common.get_user_messages(history)
-        self.uploaded_files: dict[str, files.FileMetadata] = common.get_uploaded_files(history)
+        self.uploaded_files: dict[str, FileMetadata] = common.get_uploaded_files(history)
 
         # Subscribable events, e.g. when files change or autonaming finishes
-        self.on_files_changed: AsyncEventEmitter[[dict[str, files.FileMetadata]]] = AsyncEventEmitter()
+        self.on_files_changed: AsyncEventEmitter[[dict[str, FileMetadata]]] = AsyncEventEmitter()
         self.on_autoname_finished: AsyncEventEmitter[[str]] = AsyncEventEmitter()
 
     # -------------------------------------
@@ -84,7 +85,7 @@ class ChatSession:
             content = get_or_default(message, "content", list[JSON])
             message["content"] = [block for block in content if is_valid_block(block)]
 
-    async def verify_file_uploads(self, client_session: aiohttp.ClientSession):
+    async def verify_file_uploads(self, client_session: aiohttp.ClientSession, endpoint: EndpointConfig):
         """
         Verifies the uploaded files by checking their metadata. This is useful to ensure that the files are still valid and have not been
         removed or corrupted. The updates the `uploaded_files` dictionary with the metadata of the uploaded files.
@@ -93,7 +94,7 @@ class ChatSession:
             return
 
         get_file_metadata_task = asyncio.gather(
-            *(files.get_file_metadata(client_session, file_id) for file_id, m in self.uploaded_files.items() if not is_valid_metadata(m)),
+            *(files.get_file_metadata(client_session, endpoint, file_id) for file_id, m in self.uploaded_files.items() if not is_valid_metadata(m)),
             return_exceptions=True,
         )
 
@@ -127,12 +128,12 @@ class ChatSession:
 
         await self.on_files_changed.emit(self.uploaded_files)
 
-    async def upload_file(self, client_session: aiohttp.ClientSession, file_path: str) -> dict[str, JSON]:
+    async def upload_file(self, client_session: aiohttp.ClientSession, endpoint: EndpointConfig, file_path: str) -> dict[str, JSON]:
         if not await aiofiles.os.path.isfile(file_path):
             logger.error(f"File {file_path} does not exist or is not a file.")
             raise FileNotFoundError(f"File {file_path} does not exist or is not a file.")
 
-        result = await files.upload_file(client_session, file_path)
+        result = await files.upload_file(client_session, endpoint, file_path)
         file_id = get(result, "id", str)
         if file_id is None:
             raise RuntimeError(f"Failed to upload file {file_path}. No file ID returned.")
@@ -145,13 +146,14 @@ class ChatSession:
     # -------------------------------------
     # Autonaming things
     # -------------------------------------
-    async def _autoname(self, client_session: aiohttp.ClientSession):
+    async def _autoname(self, client_session: aiohttp.ClientSession, endpoint: EndpointConfig):
         autoname_prompt = "Title this conversation with less than 30 characters. Respond with just the title and nothing else. Thank you."
         autoname_history = self.history.copy() + [{"role": "user", "content": [{"type": "text", "text": autoname_prompt}]}]
 
         try:
             response = await prompt.stream_response(
                 session=client_session,
+                endpoint=endpoint,
                 model=self.model,
                 history=autoname_history,
                 max_tokens=30,
@@ -181,12 +183,12 @@ class ChatSession:
     def is_autonaming(self) -> bool:
         return self.autoname_task is not None and not self.autoname_task.done()
 
-    def start_autoname_task(self, client_session: aiohttp.ClientSession):
+    def start_autoname_task(self, client_session: aiohttp.ClientSession, endpoint: EndpointConfig):
         if self.autoname_task is not None:
             logger.warning("Autonaming task already running, not starting a new one.")
             return
 
-        self.autoname_task = asyncio.create_task(self._autoname(client_session))
+        self.autoname_task = asyncio.create_task(self._autoname(client_session, endpoint))
 
     def cancel_autoname(self):
         if self.autoname_task is None:

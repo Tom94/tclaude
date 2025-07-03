@@ -152,6 +152,8 @@ api_key = "$ANTHROPIC_API_KEY"
 # kind = "vertex"
 # url = "https://aiplatform.googleapis.com/v1/projects/<VERTEX_API_PROJECT>/locations/global/publishers/anthropic/models/<MODEL>:streamRawPredict"
 # api_key = "$(gcloud auth print-access-token)"
+# code_execution = false # This endpoint does not support code execution
+# web_search = false # This endpoint does not support web search
 
 # Example configuration for remote Model Context Protocol (MCP) servers
 

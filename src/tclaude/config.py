@@ -58,24 +58,6 @@ def load_system_prompt(path: str) -> str | None:
     return system_prompt
 
 
-def deduce_model_name(model: str) -> str:
-    if "opus" in model:
-        if "3" in model:
-            return "claude-3-opus-latest"
-        return "claude-opus-4-0"
-    elif "sonnet" in model:
-        if "3.5" in model:
-            return "claude-3-5-sonnet-latest"
-        elif "3.7" in model:
-            return "claude-3-7-sonnet-latest"
-        elif "3" in model:
-            return "claude-3-sonnet-latest"
-        return "claude-sonnet-4-0"
-    elif "haiku" in model:
-        return "claude-3-5-haiku-latest"
-    return model
-
-
 class TClaudeArgs(argparse.Namespace):
     def __init__(self):
         super().__init__()
@@ -143,6 +125,13 @@ class EndpointConfig:
     url: str
     api_key: str | None = None
 
+    max_tokens: int | None = None
+    model: str | None = None
+    code_execution: bool | None = None
+    web_search: bool | None = None
+    thinking: bool | None = None
+    thinking_budget: int | str | None = None
+
     def __post_init__(self):
         if self.kind not in ("anthropic", "vertex"):
             raise ValueError(f"Invalid endpoint kind: {self.kind}. Expected 'anthropic' or 'vertex'.")
@@ -162,42 +151,45 @@ class EndpointConfig:
 
                 self.api_key = os.getenv(tmp)
 
+    def inherit_prompt_settings(self, config: "TClaudeConfig"):
+        if self.max_tokens is None:
+            self.max_tokens = config.max_tokens
+        if self.model is None:
+            self.model = config.model
+        if self.code_execution is None:
+            self.code_execution = config.code_execution
+        if self.web_search is None:
+            self.web_search = config.web_search
+        if self.thinking is None:
+            self.thinking = config.thinking
+        if self.thinking_budget is None:
+            self.thinking_budget = config.thinking_budget
+
 
 @dataclass
 class TClaudeConfig:
+    # Prompt settings (default values that can be overridden by the endpoint config)
     max_tokens: int
     model: str
     role: str
-
-    endpoint: str
-    endpoints: dict[str, EndpointConfig]
 
     code_execution: bool
     web_search: bool
     thinking: bool
     thinking_budget: int | str
 
-    sessions_dir: str
+    # Endpoint config (each with their own prompt settings)
+    endpoint: str
+    endpoints: dict[str, EndpointConfig]
 
+    # Global settings
+    sessions_dir: str
     mcp: McpConfig = field(default_factory=McpConfig)
 
     # Expected to come from args, but can *technically* be set in the config file.
     files: list[str] = field(default_factory=list)
     session: str | None = None
     verbose: bool = False
-
-    def __post_init__(self):
-        self.role = os.path.expanduser(self.role)
-        self.sessions_dir = os.path.expanduser(self.sessions_dir)
-
-        self.files = [os.path.expanduser(f) for f in self.files]
-        self.session = os.path.expanduser(self.session) if self.session else None
-
-    def get_endpoint_config(self) -> EndpointConfig:
-        if self.endpoint not in self.endpoints:
-            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
-
-        return self.endpoints[self.endpoint]
 
     def get_thinking_budget(self) -> int:
         if isinstance(self.thinking_budget, str):
@@ -210,19 +202,19 @@ class TClaudeConfig:
 
         return self.thinking_budget
 
+    def get_endpoint_config(self) -> EndpointConfig:
+        if self.endpoint not in self.endpoints:
+            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
+
+        return self.endpoints[self.endpoint]
+
     def apply_args_override(self, args: TClaudeArgs):
         if args.max_tokens is not None:
             self.max_tokens = args.max_tokens
         if args.model is not None:
-            self.model = deduce_model_name(args.model)
+            self.model = args.model
         if args.role is not None:
             self.role = args.role
-
-        if args.endpoint is not None:
-            self.endpoint = args.endpoint
-
-        if self.endpoint not in self.endpoints:
-            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
 
         if args.no_code_execution is not None:
             self.code_execution = not args.no_code_execution
@@ -233,6 +225,12 @@ class TClaudeConfig:
         if args.thinking_budget is not None:
             self.thinking_budget = args.thinking_budget
 
+        if args.endpoint is not None:
+            self.endpoint = args.endpoint
+
+        if self.endpoint not in self.endpoints:
+            raise ValueError(f"Endpoint '{self.endpoint}' not found in configuration. Available endpoints: {list(self.endpoints.keys())}")
+
         if args.sessions_dir is not None:
             self.sessions_dir = args.sessions_dir
 
@@ -241,6 +239,28 @@ class TClaudeConfig:
             self.session = args.session
         if args.verbose is not None:
             self.verbose = args.verbose
+
+    def finalize(self):
+        self.role = os.path.expanduser(self.role)
+        self.sessions_dir = os.path.expanduser(self.sessions_dir)
+
+        self.files = [os.path.expanduser(f) for f in self.files]
+        self.session = os.path.expanduser(self.session) if self.session else None
+
+        endpoint = self.get_endpoint_config()
+        if endpoint.max_tokens is not None:
+            self.max_tokens = endpoint.max_tokens
+        if endpoint.model is not None:
+            self.model = endpoint.model
+
+        if endpoint.code_execution is not None:
+            self.code_execution = endpoint.code_execution
+        if endpoint.web_search is not None:
+            self.web_search = endpoint.web_search
+        if endpoint.thinking is not None:
+            self.thinking = endpoint.thinking
+        if endpoint.thinking_budget is not None:
+            self.thinking_budget = endpoint.thinking_budget
 
 
 def dataclass_from_dict[T](cls: type[T], data: JSON, name: str = "config") -> T:

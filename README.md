@@ -143,7 +143,7 @@ endpoint = "anthropic"
 
 [endpoints.anthropic]
 kind = "anthropic"
-url = "https://api.anthropic.com/v1"
+url = "https://api.anthropic.com"
 api_key = "$ANTHROPIC_API_KEY"
 
 # Example vertex endpoint

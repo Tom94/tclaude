@@ -57,7 +57,7 @@ def get_messages_endpoint_anthropic(model: str, url: str, api_key: str) -> tuple
         "anthropic-beta": ",".join(beta_features),
     }
 
-    url = f"{url}/messages"
+    url = f"{url}/v1/messages"
     params: dict[str, JSON] = {
         "model": model,
     }
@@ -81,7 +81,7 @@ def get_files_endpoint_anthropic(url: str, api_key: str) -> tuple[str, dict[str,
         "anthropic-beta": "files-api-2025-04-14",
     }
 
-    url = f"{url}/files"
+    url = f"{url}/v1/files"
 
     return url, headers
 

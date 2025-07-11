@@ -206,24 +206,24 @@ async def async_main():
     Main function to parse arguments, load a JSON file containing conversation history, and print it.
     """
     parser = argparse.ArgumentParser(description="Server file operations for Anthropic AI models")
-    _ = parser.add_argument("--config", help="Path to the configuration file (default: tclaude.toml)")
-    _ = parser.add_argument("-e", "--endpoint", help="Endpoint to use for file operations (default: from config)")
+    _ = parser.add_argument("--config", type=str, help="Path to the configuration file (default: tclaude.toml)")
+    _ = parser.add_argument("-e", "--endpoint", type=str, help="Endpoint to use for file operations (default: from config)")
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     subparsers = parser.add_subparsers(dest="command", help="commands")
 
     ls_parser = subparsers.add_parser("ls", help="List files")
-    _ = ls_parser.add_argument("after_file_id", help="File id after which to start listing", nargs="?", type=str)
-    _ = ls_parser.add_argument("-n", "--num_files", default=50, help="Number of files to list", type=int)
+    _ = ls_parser.add_argument("after_file_id", type=str, nargs="?", help="File id after which to start listing")
+    _ = ls_parser.add_argument("-n", "--num_files", type=int, help="Number of files to list")
 
     rm_parser = subparsers.add_parser("rm", help="Remove files")
-    _ = rm_parser.add_argument("files", help="File ids to remove", nargs="+", type=str)
+    _ = rm_parser.add_argument("files", type=str, nargs="+", help="File ids to remove")
 
     upload_parser = subparsers.add_parser("upload", help="Upload files")
-    _ = upload_parser.add_argument("files", help="Files to upload", nargs="+", type=str)
+    _ = upload_parser.add_argument("files", type=str, nargs="+", help="Files to upload")
 
     upload_parser = subparsers.add_parser("download", help="Download files")
-    _ = upload_parser.add_argument("files", help="File ids to download", nargs="+", type=str)
+    _ = upload_parser.add_argument("files", type=str, nargs="+", help="File ids to download")
 
     args = parser.parse_args(namespace=FilesArgs())
 

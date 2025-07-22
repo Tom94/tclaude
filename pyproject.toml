@@ -22,7 +22,7 @@ dynamic = ["version"]
 description = "A complete terminal implementation of Anthropic's Claude."
 authors = [{name = "Thomas Müller", email = "tom@94.me"}]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "GPL-3.0-only"
 dependencies = [
     "aiofiles",
@@ -46,7 +46,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",

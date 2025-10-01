@@ -369,7 +369,7 @@ async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, 
                 _ = text_io.write(f"{to_superscript(','.join(sorted(superscripts)))}")
                 i += 1
 
-            text = common.word_wrap(rstrip(text_io).getvalue(), wrap_width)
+            text = common.word_wrap(text_io.getvalue().strip(), wrap_width)
             if pretty:
                 text = await common.syntax_highlight(text, "md")
 

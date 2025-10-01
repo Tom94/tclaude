@@ -128,7 +128,7 @@ Run `tclaude --help` to see all available arguments.
 # Default configuration for the tclaude CLI tool.
 # All settings can be omitted in your own config, in which case the defaults from this file will be used.
 
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-5-20250929"
 max_tokens = 16384
 role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tclaude/roles/
 

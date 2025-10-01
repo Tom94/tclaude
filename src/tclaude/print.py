@@ -396,7 +396,7 @@ async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, 
                 for val in sorted(v.cited_texts):
                     _ = references_io.write(f"   {val}\n")
             write_result_block("References", references_io.getvalue(), io, pretty, wrap_width)
-            _ = io.write("\n")
+            _ = io.write("\n\n")
 
         if stop_reason != "end_turn" and stop_reason != "tool_use" and stop_reason != "pause_turn":
             _ = io.write(f"Response ended prematurely. **Stop reason:** {stop_reason}\n\n")

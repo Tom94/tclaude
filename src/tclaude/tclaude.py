@@ -92,6 +92,7 @@ async def async_main():
     config.finalize()
 
     print_history = args.print_history
+    single_prompt = args.single_prompt
     args_input = args.input
     del args  # Ensure we don't accidentally use args (as opposed to config) after this point
 
@@ -110,7 +111,7 @@ async def async_main():
     user_input = read_user_input(args_input)
 
     # If stdout is not a terminal, execute in single prompt mode. No interactive chat; only print the response (not history)
-    if not sys.stdout.isatty():
+    if single_prompt or not sys.stdout.isatty():
         if not user_input:
             print("No input provided.", file=sys.stderr)
             sys.exit(1)

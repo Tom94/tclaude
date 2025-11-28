@@ -65,9 +65,10 @@ class TClaudeArgs(argparse.Namespace):
         self.input: list[str]
 
         self.config: str = "tclaude.toml"
-        self.version: bool = False
         self.print_default_config: bool = False
         self.print_history: bool = False
+        self.single_prompt: bool = False
+        self.version: bool = False
 
         # Configuration overrides (default values are set in TClaudeConfig)
         self.endpoint: str | None = None
@@ -100,6 +101,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("-r", "--role", type=str, help="Path to a markdown file containing a system prompt (default: default.md)")
     _ = parser.add_argument("-s", "--session", type=str, nargs="?", const="fzf", help="Path to session file for conversation history")
     _ = parser.add_argument("--sessions-dir", type=str, help="Path to directory for session files (default: current directory)")
+    _ = parser.add_argument("--single-prompt", action="store_true", help="Execute a single prompt without maintaining session history")
     _ = parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
     _ = parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024, default: half of max-tokens)")
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")

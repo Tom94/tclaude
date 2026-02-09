@@ -1,7 +1,7 @@
 # Default configuration for the tclaude CLI tool.
 # All settings can be omitted in your own config, in which case the defaults from this file will be used.
 
-model = "claude-opus-4-5-20251101"
+model = "claude-opus-4-6"
 max_tokens = 16384
 role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tclaude/roles/
 

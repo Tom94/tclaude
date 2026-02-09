@@ -93,7 +93,7 @@ def parse_tclaude_args():
     _ = parser.add_argument("-e", "--endpoint", type=str, help="Endpoint to use for the API (default: anthropic). Custom endpoints can be defined in the config file.")
     _ = parser.add_argument("-f", "--file", type=str, action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", type=int, help="Maximum number of tokens in the response (default: 16384)")
-    _ = parser.add_argument("-m", "--model", type=str, help="Anthropic model to use (default: claude-opus-4-5-20251101)")
+    _ = parser.add_argument("-m", "--model", type=str, help="Anthropic model to use (default: claude-opus-4-6)")
     _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
     _ = parser.add_argument("--print-default-config", action="store_true", help="Print the default config to stdout.")

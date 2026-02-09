@@ -40,7 +40,7 @@ class TokenCounter:
         cost_factor = 1.0
         if "opus" in model:
             cost_factor = 5.0
-            if "opus-4-5" in model:
+            if "opus-4-5" in model or "opus-4-6" in model:
                 cost_factor /= 3.0
         elif "haiku" in model:
             cost_factor = 1.0 / 3.75

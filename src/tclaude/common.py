@@ -276,6 +276,8 @@ def friendly_model_name(model: str) -> str:
         version = "4.1"
     elif "4-5" in model:
         version = "4.5"
+    elif "4-6" in model:
+        version = "4.6"
     elif "3" in model:
         version = "3.0"
     elif "4" in model:

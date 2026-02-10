@@ -319,6 +319,8 @@ async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, 
         content_block = content_blocks[i]
         block_type = get(content_block, "type", str)
 
+        prev_len = io.tell()
+
         if text_only and block_type != "text":
             i += 1
             continue
@@ -383,7 +385,11 @@ async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, 
         else:
             write_call_block(f"assistant `{block_type}`", json.dumps(content_block, indent=2, sort_keys=True), io, pretty, wrap_width)
 
-        _ = io.write("\n\n")
+        # Only if we have written anything at all, put double-newline spacing between blocks. Some model responses contain empty blocks that don't print
+        # anything, in which case we don't want to add unnecessary newlines.
+        if io.tell() > prev_len:
+            _ = io.write("\n\n")
+
         i += 1
 
     stop_reason = get(message, "stop_reason", str)

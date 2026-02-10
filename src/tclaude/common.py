@@ -263,27 +263,30 @@ def friendly_model_name(model: str) -> str:
     elif "haiku" in model:
         kind = "haiku"
 
-    if kind is None:
+    version = model_version(model)
+    if kind is None or version is None:
         return model
 
-    # Double-digit versions first, then single-digit
-    version = None
-    if "3-7" in model:
-        version = "3.7"
-    elif "3-5" in model:
-        version = "3.5"
-    elif "4-1" in model:
-        version = "4.1"
-    elif "4-5" in model:
-        version = "4.5"
-    elif "4-6" in model:
-        version = "4.6"
-    elif "3" in model:
-        version = "3.0"
-    elif "4" in model:
-        version = "4.0"
-
     return f"{kind} {version}"
+
+
+def model_version(model: str) -> str | None:
+    if "3-7" in model:
+        return "3.7"
+    elif "3-5" in model:
+        return "3.5"
+    elif "4-1" in model:
+        return "4.1"
+    elif "4-5" in model:
+        return "4.5"
+    elif "4-6" in model:
+        return "4.6"
+    elif "3" in model:
+        return "3.0"
+    elif "4" in model:
+        return "4.0"
+
+    return None
 
 
 def make_check_bat_available() -> Callable[[], tuple[bool, list[str]]]:

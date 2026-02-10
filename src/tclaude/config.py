@@ -22,8 +22,10 @@ import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from packaging.version import Version
 from typing import cast, get_args, get_origin
 
+from .common import model_version
 from .json import JSON, generic_is_instance
 
 logger = logging.getLogger(__package__)
@@ -81,7 +83,7 @@ class TClaudeArgs(argparse.Namespace):
         self.session: str | None = None
         self.sessions_dir: str | None = None
         self.thinking: bool | None = None
-        self.thinking_budget: int | None = None
+        self.thinking_budget: str | None = None
         self.verbose: bool | None = None
 
 
@@ -90,7 +92,9 @@ def parse_tclaude_args():
     _ = parser.add_argument("input", nargs="*", help="Input text to send to Claude")
 
     _ = parser.add_argument("--config", type=str, help="Path to the configuration file (default: tclaude.toml)")
-    _ = parser.add_argument("-e", "--endpoint", type=str, help="Endpoint to use for the API (default: anthropic). Custom endpoints can be defined in the config file.")
+    _ = parser.add_argument(
+        "-e", "--endpoint", type=str, help="Endpoint to use for the API (default: anthropic). Custom endpoints can be defined in the config file."
+    )
     _ = parser.add_argument("-f", "--file", type=str, action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", type=int, help="Maximum number of tokens in the response (default: 16384)")
     _ = parser.add_argument("-m", "--model", type=str, help="Anthropic model to use (default: claude-opus-4-6)")
@@ -103,7 +107,11 @@ def parse_tclaude_args():
     _ = parser.add_argument("--sessions-dir", type=str, help="Path to directory for session files (default: current directory)")
     _ = parser.add_argument("--single-prompt", action="store_true", help="Execute a single prompt without maintaining session history")
     _ = parser.add_argument("--thinking", action="store_true", help="Enable Claude's extended thinking process")
-    _ = parser.add_argument("--thinking-budget", type=int, help="Number of tokens to allocate for thinking (min 1024, default: half of max-tokens)")
+    _ = parser.add_argument(
+        "--thinking-budget",
+        type=str,
+        help="For models version 4.6 and above: 'low', 'medium', 'high', or 'max' thinking effort (default: medium). For earlier models: number of tokens to allocate for thinking (min 1024, default: half of max-tokens)",
+    )
     _ = parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     _ = parser.add_argument("-v", "--version", action="store_true", help="Print version information and exit")
 
@@ -204,7 +212,7 @@ class TClaudeConfig:
     code_execution: bool
     web_search: bool
     thinking: bool
-    thinking_budget: int | str
+    thinking_budget: str
 
     # Endpoint config (each with their own prompt settings)
     endpoint: str
@@ -219,16 +227,29 @@ class TClaudeConfig:
     session: str | None = None
     verbose: bool = False
 
-    def get_thinking_budget(self) -> int:
-        if isinstance(self.thinking_budget, str):
-            if self.thinking_budget == "auto":
+    def get_thinking_budget(self) -> int | str:
+        version = model_version(self.model)
+        has_adaptive_thinking = version is not None and Version(version) >= Version("4.6")
+
+        if self.thinking_budget == "auto":
+            if has_adaptive_thinking:
+                return "medium"
+            else:
                 if self.max_tokens < 1024:
                     raise ValueError("Auto thinking budget requires max_tokens to be at least 1024.")
                 return self.max_tokens // 2
-            else:
-                raise ValueError(f"Invalid thinking budget: {self.thinking_budget}. Expected 'auto' or an integer.")
-
-        return self.thinking_budget
+        elif self.thinking_budget in ("low", "medium", "high", "max"):
+            if not has_adaptive_thinking:
+                raise ValueError(f"Thinking budget value '{self.thinking_budget}' is not valid for model version {version}. Expected an integer or 'auto'.")
+            return self.thinking_budget
+        elif self.thinking_budget.isdecimal():
+            if has_adaptive_thinking:
+                raise ValueError(
+                    f"Thinking budget value '{self.thinking_budget}' is not valid for model version {version}. Expected 'low', 'medium', 'high', 'max', or 'auto'."
+                )
+            return int(self.thinking_budget)
+        else:
+            raise ValueError(f"Invalid thinking budget: {self.thinking_budget}. Expected 'auto' or an integer.")
 
     def get_endpoint_config(self) -> EndpointConfig:
         if self.endpoint not in self.endpoints:
@@ -268,6 +289,8 @@ class TClaudeConfig:
         if args.verbose is not None:
             self.verbose = args.verbose
 
+        _ = self.get_thinking_budget()  # Validate thinking budget early
+
     def finalize(self):
         self.role = os.path.expanduser(self.role)
         self.sessions_dir = os.path.expanduser(self.sessions_dir)
@@ -288,7 +311,7 @@ class TClaudeConfig:
         if endpoint.thinking is not None:
             self.thinking = endpoint.thinking
         if endpoint.thinking_budget is not None:
-            self.thinking_budget = endpoint.thinking_budget
+            self.thinking_budget = str(endpoint.thinking_budget)
 
 
 def dataclass_from_dict[T](cls: type[T], data: JSON, name: str = "config") -> T:

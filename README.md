@@ -135,7 +135,7 @@ role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tcl
 code_execution = true
 web_search = true
 thinking = false
-thinking_budget = "auto"  # In tokens. (default: max_tokens / 2)
+thinking_budget = "auto"  # Models >=4.6: 'low', 'medium', 'high', or 'max'; earlier models: integer token count.
 
 sessions_dir = "."  # Directory for storing session data.
 

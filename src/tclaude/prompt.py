@@ -23,12 +23,13 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from io import StringIO
 from typing import Callable, cast
+from packaging.version import Version
 
 import aiohttp
 from partial_json_parser import loads as ploads  # pyright: ignore
 
 from . import common, endpoints, files, tool_use
-from .common import History
+from .common import History, model_version
 from .config import EndpointConfig
 from .json import JSON, get, get_or, get_or_default
 from .token_counter import TokenCounter
@@ -86,7 +87,7 @@ async def stream_response(
     mcp_remote_servers: list[dict[str, JSON]] | None = None,
     system_prompt: str | None = None,
     enable_thinking: bool = False,
-    thinking_budget: int | None = None,
+    thinking_budget: int | str | None = None,
     write_cache: bool = False,
     on_response_update: Callable[[Response], None] | None = None,
 ) -> Response:
@@ -144,12 +145,22 @@ async def stream_response(
 
     # Add extended thinking if enabled
     if enable_thinking:
-        thinking_config: JSON = {
-            "type": "enabled",
-            "budget_tokens": thinking_budget if thinking_budget is not None else max(1024, max_tokens // 2),
-        }
+        version = model_version(model)
+        if version is not None and Version(version) >= Version("4.6"):
+            if isinstance(thinking_budget, int):
+                raise ValueError("For models version 4.6 and above, thinking_budget must be a string.")
 
-        params["thinking"] = thinking_config
+            params["thinking"] = {"type": "adaptive"}
+            if thinking_budget is not None:
+                params["output_config"] = {"effort": thinking_budget}
+        else:
+            if isinstance(thinking_budget, str):
+                raise ValueError("For models version below 4.6, thinking_budget must be an integer number of tokens.")
+
+            params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_budget if thinking_budget is not None else max(1024, max_tokens // 2),
+            }
 
     # Add web search tool if enabled
     tools: list[JSON] = []

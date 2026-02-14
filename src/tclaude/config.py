@@ -73,11 +73,11 @@ class TClaudeArgs(argparse.Namespace):
         self.version: bool = False
 
         # Configuration overrides (default values are set in TClaudeConfig)
+        self.code_execution: bool | None = None
         self.endpoint: str | None = None
         self.file: list[str] = []
         self.max_tokens: int | None = None
         self.model: str | None = None
-        self.no_code_execution: bool | None = None
         self.no_web_search: bool | None = None
         self.role: str | None = None
         self.session: str | None = None
@@ -95,10 +95,10 @@ def parse_tclaude_args():
     _ = parser.add_argument(
         "-e", "--endpoint", type=str, help="Endpoint to use for the API (default: anthropic). Custom endpoints can be defined in the config file."
     )
+    _ = parser.add_argument("--code-execution", action="store_true", help="Code execution capability")
     _ = parser.add_argument("-f", "--file", type=str, action="append", help="Path to a file that should be sent to Claude as input")
     _ = parser.add_argument("--max-tokens", type=int, help="Maximum number of tokens in the response (default: 16384)")
     _ = parser.add_argument("-m", "--model", type=str, help="Anthropic model to use (default: claude-opus-4-6)")
-    _ = parser.add_argument("--no-code-execution", action="store_true", help="Disable code execution capability")
     _ = parser.add_argument("--no-web-search", action="store_true", help="Disable web search capability")
     _ = parser.add_argument("--print-default-config", action="store_true", help="Print the default config to stdout.")
     _ = parser.add_argument("-p", "--print-history", action="store_true", help="Print the conversation history only, without prompting.")
@@ -265,8 +265,8 @@ class TClaudeConfig:
         if args.role is not None:
             self.role = args.role
 
-        if args.no_code_execution is not None:
-            self.code_execution = not args.no_code_execution
+        if args.code_execution is not None:
+            self.code_execution = args.code_execution
         if args.no_web_search is not None:
             self.web_search = not args.no_web_search
         if args.thinking is not None:

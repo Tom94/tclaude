@@ -24,16 +24,16 @@
           keyring
           mcp
           oauthlib
+          packaging
           partial-json-parser
           prompt_toolkit
           wcwidth
         ];
 
         # Extract version from __init__.py
-        versionFromInit = builtins.head (
-          builtins.match ".*__version__ = \"([^\"]+)\".*"
-            (builtins.readFile ./src/tclaude/__init__.py)
-        );
+        versionFromInit = builtins.head
+          (builtins.match ''.*__version__ = "([^"]+)".*''
+            (builtins.readFile ./src/tclaude/__init__.py));
 
         # Your package derivation
         tclaudeProject = pythonPackages.buildPythonPackage rec {
@@ -45,10 +45,7 @@
           propagatedBuildInputs = pythonDeps;
 
           # Optional: specify build dependencies
-          nativeBuildInputs = with pythonPackages; [
-            setuptools
-            wheel
-          ];
+          nativeBuildInputs = with pythonPackages; [ setuptools wheel ];
 
           # checkInputs = with pythonPackages; [
           #   pytest
@@ -60,8 +57,7 @@
           # '';
         };
 
-      in
-      {
+      in {
         # System installation
         packages.default = tclaudeProject;
 

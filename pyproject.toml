@@ -34,6 +34,7 @@ dependencies = [
     "keyring",
     "mcp",
     "oauthlib",
+    "packaging",
     "partial-json-parser",
     "prompt_toolkit",
     "wcwidth",

@@ -119,7 +119,7 @@ If you have `$XDG_CONFIG_HOME` set, the file should be placed at `$XDG_CONFIG_HO
 
 The default configuration file looks as follows. (Or use `tclaude --print-default-config` to print it to stdout.)
 You can copy it as a starting point for your own configuration or you can only set the settings you want to differ from the defaults.
-Commenta indicate optional settings such as custom endpoints or MCP servers.
+Comments indicate optional settings such as custom endpoints or MCP servers.
 
 Nearly all settings can be overridden via command line arguments, e.g. `tclaude --thinking` or `tclaude --no-web-search`.
 Run `tclaude --help` to see all available arguments.

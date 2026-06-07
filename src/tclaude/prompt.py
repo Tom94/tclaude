@@ -107,9 +107,10 @@ async def stream_response(
     url, headers, params = endpoints.get_messages_endpoint(model, endpoint)
 
     # Use the latest container if available
-    container = common.get_latest_container(history)
-    if container is not None:
-        params["container"] = container.id
+    if enable_code_exec:
+        container = common.get_latest_container(history)
+        if container is not None:
+            params["container"] = container.id
 
     if write_cache:
         # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use

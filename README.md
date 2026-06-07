@@ -132,7 +132,7 @@ model = "claude-opus-4-8"
 max_tokens = 16384
 role = "default.md"  # Custom system prompt file. Should be placed ~/.config/tclaude/roles/
 
-code_execution = false
+code_execution = true
 web_search = true
 thinking = false
 thinking_budget = "auto"  # Models >=4.6: 'low', 'medium', 'high', or 'max'; earlier models: integer token count.

@@ -112,7 +112,7 @@ async def single_prompt(config: TClaudeConfig, history: History, user_input: str
             mcp = await stack.enter_async_context(setup_mcp(client_session, config.mcp))
 
         user_content: list[JSON] = [{"type": "text", "text": user_input}]
-        user_content.extend(chain.from_iterable(file_metadata_to_content(m.result()) for m in file_metadata if m))
+        user_content.extend(chain.from_iterable(file_metadata_to_content(m.result(), config.code_execution) for m in file_metadata if m))
         history.append({"role": "user", "content": user_content})
         response_idx = len(history)
 
@@ -294,7 +294,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                     _ = metadata.pop("_input_pending", None)
 
                 user_content: list[JSON] = [{"type": "text", "text": user_input}]
-                user_content.extend(chain.from_iterable(file_metadata_to_content(m) for m in files_to_input if m))
+                user_content.extend(chain.from_iterable(file_metadata_to_content(m, config.code_execution) for m in files_to_input if m))
                 user_input = ""
 
                 session.history.append({"role": "user", "content": user_content})

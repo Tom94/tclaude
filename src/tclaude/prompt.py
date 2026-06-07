@@ -329,7 +329,7 @@ def filter_invalid_messages(messages: History) -> History:
     return result
 
 
-def file_metadata_to_content(metadata: JSON) -> list[JSON]:
+def file_metadata_to_content(metadata: JSON, enable_code_exec: bool) -> list[JSON]:
     """
     Convert a file metadata JSON object to a list of content blocks that can be added to the history.
     """
@@ -342,7 +342,9 @@ def file_metadata_to_content(metadata: JSON) -> list[JSON]:
 
     # Even if the type is invalid, the code execution tool might still be able to handle the file. Always put valid file IDs
     # into the code execution container.
-    content.append({"type": "container_upload", "file_id": id})
+    if enable_code_exec:
+        content.append({"type": "container_upload", "file_id": id})
+
     if type is None:
         return content
 

@@ -21,6 +21,24 @@ import logging
 logger = logging.getLogger(__package__)
 
 
+def cost_factor(model: str) -> float:
+    cost_factor = 3.0
+    if "opus" in model:
+        cost_factor = 15.0
+        if any(s in model for s in ("opus-4-5", "opus-4-6", "opus-4-7", "opus-4-8")):
+            cost_factor /= 3.0
+    elif "haiku" in model:
+        cost_factor = 3.0 / 3.75
+        if "haiku-4-5" in model:
+            cost_factor = 1.0
+        if "3-haiku" in model:
+            cost_factor *= 0.3
+    elif "fable" in model:
+        cost_factor = 10.0
+
+    return cost_factor
+
+
 class TokenCounter:
     def __init__(self, cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0, input_tokens: int = 0, output_tokens: int = 0):
         self.cache_creation: int = cache_creation_input_tokens
@@ -37,23 +55,11 @@ class TokenCounter:
         return result
 
     def cost(self, model: str) -> tuple[float, float, float, float]:
-        cost_factor = 1.0
-        if "opus" in model:
-            cost_factor = 5.0
-            if any(s in model for s in ("opus-4-5", "opus-4-6", "opus-4-7", "opus-4-8")):
-                cost_factor /= 3.0
-        elif "haiku" in model:
-            cost_factor = 1.0 / 3.75
-            if "haiku-4-5" in model:
-                cost_factor = 1.0 / 3.0
-            if "3-haiku" in model:
-                cost_factor *= 0.3
-
         # See https://docs.anthropic.com/en/docs/about-claude/models/overview#model-pricing
-        price_per_minput_cache_creation = 3.75 * cost_factor
-        price_per_minput_cache_read = 0.3 * cost_factor
-        price_per_minput = 3.0 * cost_factor
-        price_per_moutput = 15.0 * cost_factor
+        price_per_minput = cost_factor(model)
+        price_per_moutput = 5.0 * price_per_minput
+        price_per_minput_cache_creation = 11.25 * price_per_minput
+        price_per_minput_cache_read = 0.9 * price_per_minput
 
         cache_creation_cost = (self.cache_creation / 1000000) * price_per_minput_cache_creation
         cache_read_cost = (self.cache_read / 1000000) * price_per_minput_cache_read

@@ -262,6 +262,8 @@ def friendly_model_name(model: str) -> str:
         kind = "sonnet"
     elif "haiku" in model:
         kind = "haiku"
+    elif "fable" in model:
+        kind = "fable"
 
     version = model_version(model)
     if kind is None or version is None:
@@ -289,6 +291,8 @@ def model_version(model: str) -> str | None:
         return "3.0"
     elif "4" in model:
         return "4.0"
+    elif "5" in model:
+        return "5.0"
 
     return None
 

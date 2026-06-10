@@ -330,7 +330,9 @@ async def write_assistant_message(tool_results: dict[str, JSON], message: JSON, 
             continue  # These are handled alongside the tool use
 
         if block_type == "thinking":
-            write_call_block("Thinking", get_or(content_block, "thinking", ""), io, pretty, wrap_width)
+            thoughts = get_or(content_block, "thinking", "").strip()
+            if thoughts:
+                write_call_block("Thinking", thoughts, io, pretty, wrap_width)
         elif block_type == "text":
             text_io = StringIO()
             while i < len(content_blocks) and get(content_blocks[i], "type", str) == "text":

@@ -62,7 +62,7 @@ You can resume the session with `tclaude -s <session-name>.json` or browse past 
 
 Customize where sessions are saved by passing `--sessions-dir <dir>` or by setting `sessions_dir` in the [configuration file](#configuration).
 
-### Extended thinking
+### Extended / adaptive thinking
 
 Enable thinking with `--thinking` or by setting `thinking = true` in the [configuration file](#configuration).
 
@@ -70,6 +70,10 @@ Enable thinking with `--thinking` or by setting `thinking = true` in the [config
 tclaude --thinking "Write a quine in C++."
 > [Claude thinks about how to write a quine before responding.]
 ```
+
+Note that thinking is [always on for Fable class models](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) and can not be disabled. If
+thinking is disabled for these models, **tclaude** will omit thought summaries from the response, but the model still generates billed thinking tokens behind
+the scenes.
 
 ### Commands
 

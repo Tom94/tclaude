@@ -151,7 +151,7 @@ async def stream_response(
             if isinstance(thinking_budget, int):
                 raise ValueError("For models version 4.6 and above, thinking_budget must be a string.")
 
-            params["thinking"] = {"type": "adaptive"}
+            params["thinking"] = {"type": "adaptive", "display": "summarized"}
             if thinking_budget is not None:
                 params["output_config"] = {"effort": thinking_budget}
         else:
@@ -305,12 +305,7 @@ async def stream_response(
 def filter_invalid_messages(messages: History) -> History:
     def is_content_block_valid(content_block: JSON) -> bool:
         match content_block:
-            case (
-                {"type": "thinking", "thinking": ""}
-                | {"type": "signature", "signature": ""}
-                | {"type": "text", "text": ""}
-                | {"type": "citations", "citations": []}
-            ):
+            case {"type": "signature", "signature": ""} | {"type": "text", "text": ""} | {"type": "citations", "citations": []}:
                 logger.warning(f"Content block {content_block} is empty, removing it.")
                 return False
             case _:

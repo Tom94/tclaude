@@ -50,22 +50,6 @@ from .tool_use import get_python_tools
 logger = logging.getLogger(__package__)
 
 
-def should_cache(tokens: TokenCounter, model: str) -> bool:
-    """
-    We heuristically set a new cache breakpoint when our next prompt (if short ~0 tokens) causes the cost of input to be larger
-    than that of cache reads.
-    TODO: If we just finished a web search, apparently something messy happens to the cache... should investigate
-    """
-    tokens_if_short_follow_up = TokenCounter(
-        cache_creation_input_tokens=0,
-        cache_read_input_tokens=tokens.cache_read + tokens.cache_creation,
-        input_tokens=tokens.input + tokens.output,
-        output_tokens=0,
-    )
-    _, cache_read_cost, input_cost, _ = tokens_if_short_follow_up.cost(model)
-    return cache_read_cost < input_cost
-
-
 async def gather_file_uploads(tasks: list[asyncio.Task[dict[str, JSON]]]) -> list[dict[str, JSON]]:
     """
     Wait for all file upload tasks to complete and return the results.
@@ -313,13 +297,10 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                 tool_definitions.extend(mcp_tool_definitions)
 
             container = common.get_latest_container(session.history)
-            write_cache = should_cache(response.tokens, config.model) if response is not None else False
 
             if config.verbose:
                 if container is not None:
                     logger.info(f"Reusing code execution container `{container.id}`")
-
-                logger.info(f"write_cache={write_cache}")
 
             partial_response: Response = Response(messages=[], tokens=TokenCounter(), call_again=False)
 
@@ -340,7 +321,7 @@ async def chat(config: TClaudeConfig, history: History, user_input: str):
                             system_prompt=session.system_prompt,
                             enable_thinking=config.thinking,
                             thinking_budget=config.get_thinking_budget(),
-                            write_cache=write_cache,
+                            write_cache=True,
                             on_response_update=lambda r: partial_response.__setattr__("messages", r.messages),
                         )
                     )

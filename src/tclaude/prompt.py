@@ -112,25 +112,6 @@ async def stream_response(
         if container is not None:
             params["container"] = container.id
 
-    if write_cache:
-        # See https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#how-many-cache-breakpoints-can-i-use
-        # We set the maximum to the docs-specified 4 minus one for the system prompt.
-        MAX_NUM_CACHE_BREAKPOINTS = 4 - 1
-
-        # First remove all but the last max-1 cache_control entries
-        num_cache_breakpoints = 0
-        for message in reversed(history):
-            for content_block in get_or_default(message, "content", list[dict[str, JSON]]):
-                if "cache_control" in content_block:
-                    num_cache_breakpoints += 1
-                    if num_cache_breakpoints >= MAX_NUM_CACHE_BREAKPOINTS - 1:
-                        del content_block["cache_control"]
-
-        # Then set a new cache breakpoint for the last message
-        last_message = get_or_default(history[-1], "content", list[dict[str, JSON]])
-        if last_message:
-            last_message[0]["cache_control"] = {"type": "ephemeral"}
-
     # Make a copy is history in which messages don't contain anything but role and content. The online APIs aren't happy if they get more
     # data than that.
     history_to_submit: list[JSON] = [{"role": get_or(m, "role", ""), "content": get_or_default(m, "content", list[JSON])} for m in history]
@@ -139,10 +120,12 @@ async def stream_response(
     params["max_tokens"] = max_tokens
     params["messages"] = history_to_submit
     params["stream"] = True
+    if write_cache:
+        params["cache_control"] = {"type": "ephemeral"}
 
-    # Add system prompt if provided. Always cache it.
+    # Add system prompt if provided
     if system_prompt is not None:
-        params["system"] = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+        params["system"] = [{"type": "text", "text": system_prompt}]
 
     # Add extended thinking if enabled
     if enable_thinking:

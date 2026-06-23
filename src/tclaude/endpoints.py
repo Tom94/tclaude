@@ -48,6 +48,7 @@ def get_messages_endpoint_anthropic(model: str, url: str, api_key: str) -> tuple
         "files-api-2025-04-14",
         "mcp-client-2025-04-04",
         "fine-grained-tool-streaming-2025-05-14",
+        "cache-diagnosis-2026-04-07",
     ]
 
     headers = {

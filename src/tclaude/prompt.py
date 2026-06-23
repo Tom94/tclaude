@@ -123,6 +123,16 @@ async def stream_response(
     if write_cache:
         params["cache_control"] = {"type": "ephemeral"}
 
+        prev_message_id = None
+        for message in reversed(history):
+            message_id = get(message, "id", str)
+            if message_id is not None:
+                prev_message_id = message_id
+                break
+
+        logger.debug(f"Automatic caching from message: {prev_message_id}")
+        params["diagnostics"] = {"previous_message_id": prev_message_id}
+
     # Add system prompt if provided
     if system_prompt is not None:
         params["system"] = [{"type": "text", "text": system_prompt}]
@@ -187,10 +197,21 @@ async def stream_response(
                     continue
 
                 # Message block types
-                case {"type": "message_start", "message": dict(message)}:
+                case {"type": "message_start", "message": dict(message), **rest}:
                     messages.append(message)
                     messages[-1]["role"] = "assistant"
                     messages[-1]["content"] = []
+
+                    id = get(message, "id", str)
+                    if id is not None:
+                        logger.debug(f"Streaming response for message ID: {id}")
+                        messages[-1]["id"] = id
+
+                    diagnostics = get(rest, "diagnostics", dict[str, JSON])
+                    if diagnostics:
+                        logger.debug(f"Diagnostics for message ID {id}: {diagnostics}")
+                        messages[-1]["diagnostics"] = diagnostics
+
                     tool_use_json = {}
                 case {"type": "message_delta", "delta": dict(delta), **rest}:
                     usage = get(rest, "usage", dict[str, JSON])

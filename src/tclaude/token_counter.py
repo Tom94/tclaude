@@ -22,11 +22,9 @@ logger = logging.getLogger(__package__)
 
 
 def cost_factor(model: str) -> float:
-    cost_factor = 3.0
+    cost_factor = 3.0  # sonnet
     if "opus" in model:
-        cost_factor = 15.0
-        if any(s in model for s in ("opus-4-5", "opus-4-6", "opus-4-7", "opus-4-8")):
-            cost_factor /= 3.0
+        cost_factor = 5.0
     elif "haiku" in model:
         cost_factor = 3.0 / 3.75
         if "haiku-4-5" in model:

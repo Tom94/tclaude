@@ -59,6 +59,9 @@ class TokenCounter:
         price_per_minput_cache_creation = 11.25 * price_per_minput
         price_per_minput_cache_read = 0.9 * price_per_minput
 
+        if "fable-5-1" in model:
+            price_per_minput_cache_read *= 0.25
+
         cache_creation_cost = (self.cache_creation / 1000000) * price_per_minput_cache_creation
         cache_read_cost = (self.cache_read / 1000000) * price_per_minput_cache_read
         input_cost = (self.input / 1000000) * price_per_minput

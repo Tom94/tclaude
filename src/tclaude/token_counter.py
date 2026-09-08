@@ -56,8 +56,8 @@ class TokenCounter:
         # See https://docs.anthropic.com/en/docs/about-claude/models/overview#model-pricing
         price_per_minput = cost_factor(model)
         price_per_moutput = 5.0 * price_per_minput
-        price_per_minput_cache_creation = 11.25 * price_per_minput
-        price_per_minput_cache_read = 0.9 * price_per_minput
+        price_per_minput_cache_creation = 1.25 * price_per_minput
+        price_per_minput_cache_read = 0.1 * price_per_minput
 
         if "fable-5-1" in model:
             price_per_minput_cache_read *= 0.25

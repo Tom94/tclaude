@@ -22,6 +22,11 @@ logger = logging.getLogger(__package__)
 
 
 def cost_factor(model: str) -> float:
+    if model == "claude-opus-5-5":
+        return 4.0
+    if model == "claude-sonnet-5":
+        return 2.0
+
     cost_factor = 3.0  # sonnet
     if "opus" in model:
         cost_factor = 5.0

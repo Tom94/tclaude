@@ -293,6 +293,8 @@ def model_version(model: str) -> str | None:
         return "4.0"
     elif "5-1" in model:
         return "5.1"
+    elif "5-5" in model:
+        return "5.5"
     elif "5" in model:
         return "5.0"
 
